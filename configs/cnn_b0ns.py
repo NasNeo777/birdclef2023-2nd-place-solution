@@ -33,7 +33,7 @@ cfg.PRECISION = 32
 cfg.seed = {
     #"pretrain_ce": 20231121,
     #"pretrain_bce": 20230503,
-    "train_ce": 202111210524,
+    "train_ce": 20211121,
     #"train_bce": 20231911,
     #"finetune": 20230523,
 }

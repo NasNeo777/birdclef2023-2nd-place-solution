@@ -44,10 +44,10 @@ def preprocess(cfg):
     # primary_label_strict: fuse the ebird_code with same name but different number. ex: categr1	to categr
     # primary_label: fuse the same species with different ebird code: ['grbcam1',  'blkkit3',  'whcshr1', 'barowl8','barowl7','egwtea1','foxsp1','euhgul1']
     df = pd.read_csv(cfg.train_data)
-    df['secondary_labels'] = df['secondary_labels'].apply(lambda x: literal_eval(x))
-    df['secondary_labels_2023'] = df['secondary_labels_2023'].apply(lambda x: literal_eval(x))
-    df['secondary_labels_strict'] = df['secondary_labels_strict'].apply(lambda x: literal_eval(x))
-    df['secondary_labels_very_strict'] = df['secondary_labels_very_strict'].apply(lambda x: literal_eval(x))
+    for col in ['secondary_labels', 'secondary_labels_2023', 'secondary_labels_strict', 'secondary_labels_very_strict']:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: literal_eval(x) if isinstance(x, str) else x)
+    
     df['version'] = df['collection'].astype(str) if 'collection' in df.columns else '2023'
     df['rating'] = df['rating'].mask(np.isnan(df['rating'].values),df.get('q', pd.Series([np.nan]*len(df))).map({'A':5,'B':4,'C':3,'D':2,'E':1,'no score':0}))
     if 'filename' not in df.columns:
