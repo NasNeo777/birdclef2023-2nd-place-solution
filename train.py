@@ -28,6 +28,11 @@ def main():
     cfg = importlib.import_module(f'configs.{model_name}').basic_cfg
     cfg = prepare_cfg(cfg,stage)
     os.environ['WANDB_API_KEY'] = cfg.WANDB_API_KEY
+    os.environ.setdefault(
+        "PYTORCH_CUDA_ALLOC_CONF",
+        getattr(cfg, "cuda_alloc_conf", "expandable_segments:True"),
+    )
+    torch.set_float32_matmul_precision(getattr(cfg, "val_matmul_precision", "high"))
 
     pl.seed_everything(cfg.seed[stage], workers=True)
 
@@ -93,6 +98,10 @@ def main():
         val_check_interval=1.0,
         deterministic=None,
         max_epochs=cfg.epochs[stage],
+        num_sanity_val_steps=getattr(cfg, "num_sanity_val_steps", 0),
+        accumulate_grad_batches=getattr(cfg, "accumulate_grad_batches", 1),
+        gradient_clip_val=getattr(cfg, "gradient_clip_val", 0.0),
+        gradient_clip_algorithm=getattr(cfg, "gradient_clip_algorithm", "norm"),
         logger=logger,
         callbacks=callbacks_to_use,
         precision=cfg.PRECISION, accelerator="auto",

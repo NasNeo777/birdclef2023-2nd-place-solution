@@ -1,5 +1,6 @@
 import librosa as lb
 import numpy as np
+import soundfile as sf
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from modules.utils import crop_or_pad
@@ -60,6 +61,31 @@ class BirdTrainDataset(Dataset):
           target[label] = target[label] * adjust_label[label]
         return target
 
+    def _read_audio(self, filepath, offset=0.0, duration=None):
+        try:
+            audio, orig_sr = sf.read(filepath, dtype="float32", always_2d=True)
+            audio = audio.mean(axis=1)
+        except Exception:
+            audio, orig_sr = lb.load(filepath, sr=None, mono=True)
+            audio = audio.astype(np.float32, copy=False)
+
+        start = max(0, int(round(offset * orig_sr)))
+        if duration is None:
+            end = len(audio)
+        else:
+            end = start + int(round(duration * orig_sr))
+        audio = audio[start:end]
+
+        if self.resample and orig_sr != self.sr:
+            audio = lb.resample(
+                audio,
+                orig_sr=orig_sr,
+                target_sr=self.sr,
+                res_type=self.res_type,
+            )
+
+        return audio.astype(np.float32, copy=False), orig_sr
+
     def load_data(self, filepath,target,row):
         filename = row['filename']
         labels = [bird for bird in list(set([row[self.cfg.primary_label_col]] + row[self.cfg.secondary_labels_col])) if bird in self.cfg.bird_cols]
@@ -82,18 +108,18 @@ class BirdTrainDataset(Dataset):
 
         if self.train:
             offset = torch.rand((1,)).numpy()[0] * max_offset
-            audio_sample, orig_sr = lb.load(filepath, sr=None, mono=True,offset=offset, duration=work_duration)
-            if (self.resample)&(orig_sr != self.sr):
-                audio_sample = lb.resample(audio_sample, orig_sr, self.sr, res_type=self.res_type)
+            audio_sample, orig_sr = self._read_audio(filepath, offset=offset, duration=work_duration)
 
             if len(audio_sample) < work_audio_length:
                 audio_sample = crop_or_pad(audio_sample, length=work_audio_length,is_train=self.train)
 
             audio_sample = audio_sample.reshape((self_mixup_part,-1))
-            audio_sample = np.sum(audio_sample,axis=0)
+            audio_sample = np.sum(audio_sample, axis=0, dtype=np.float32)
+            audio_sample = np.asarray(audio_sample, dtype=np.float32)
 
             if self.transforms is not None:
               audio_sample = self.transforms(audio_sample)
+              audio_sample = np.asarray(audio_sample, dtype=np.float32)
 
             if len(audio_sample) != self.audio_length:
                 audio_sample = crop_or_pad(audio_sample, length=self.audio_length,is_train=self.train)
@@ -113,9 +139,7 @@ class BirdTrainDataset(Dataset):
                 target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset4']['pseudo'],self.pseudo['subset4']['weight'])
 
         else:
-            audio, orig_sr = lb.load(filepath, sr=None, mono=True,offset=0,duration=self.cfg.valid_duration)
-            if self.resample and orig_sr != self.sr:
-                audio = lb.resample(audio, orig_sr, self.sr, res_type=self.res_type)
+            audio, orig_sr = self._read_audio(filepath, offset=0, duration=self.cfg.valid_duration)
 
             audio_parts = int(np.ceil(len(audio)/self.audio_length))
             audio_sample = [audio[i*self.audio_length:(i+1)*self.audio_length] for i in range(audio_parts)]
@@ -128,10 +152,10 @@ class BirdTrainDataset(Dataset):
               audio_sample = audio_sample[0:valid_len]
             elif len(audio_sample)<valid_len:
               diff = valid_len-len(audio_sample)
-              padding = [np.zeros(shape=(self.audio_length,))] * diff
+              padding = [np.zeros(shape=(self.audio_length,), dtype=np.float32)] * diff
               audio_sample += padding
 
-            audio_sample = np.stack(audio_sample)
+            audio_sample = np.stack(audio_sample).astype(np.float32, copy=False)
 
             sample_end = np.min([audio_parts * self.cfg.infer_duration, pseudo_max_end])
             sample_ends = [str(sample_end-i*self.cfg.infer_duration) for i in range(valid_len) if sample_end-i*self.cfg.infer_duration>0]
@@ -165,7 +189,8 @@ class BirdTrainDataset(Dataset):
         return audio, target , weight
 
 def get_train_dataloader(df_train, df_valid, df_labels_train, df_labels_valid, sample_weight,cfg,pseudo=None,transforms=None):
-  num_workers = multiprocessing.cpu_count()
+  train_num_workers = int(getattr(cfg, "num_workers", min(4, multiprocessing.cpu_count())))
+  val_num_workers = int(getattr(cfg, "val_num_workers", train_num_workers))
   sample_weight = torch.from_numpy(sample_weight)
   sampler = WeightedRandomSampler(sample_weight.type('torch.DoubleTensor'), len(sample_weight),replacement=True)
 
@@ -185,6 +210,19 @@ def get_train_dataloader(df_train, df_valid, df_labels_train, df_labels_valid, s
       pseudo = None,
       transforms=None,
   )
-  dl_train = DataLoader(ds_train, batch_size=cfg.batch_size , sampler=sampler, num_workers = num_workers, pin_memory=True)
-  dl_val = DataLoader(ds_val, batch_size=cfg.test_batch_size, num_workers = num_workers, pin_memory=True)
+  dl_train = DataLoader(
+      ds_train,
+      batch_size=cfg.batch_size,
+      sampler=sampler,
+      num_workers=train_num_workers,
+      pin_memory=True,
+      persistent_workers=train_num_workers > 0,
+  )
+  dl_val = DataLoader(
+      ds_val,
+      batch_size=cfg.test_batch_size,
+      num_workers=val_num_workers,
+      pin_memory=True,
+      persistent_workers=val_num_workers > 0,
+  )
   return dl_train, dl_val, ds_train, ds_val

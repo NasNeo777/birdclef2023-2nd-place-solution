@@ -28,8 +28,9 @@ cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
 
 
-cfg.batch_size = 156
+cfg.batch_size = 16
 cfg.PRECISION = 32
+cfg.accumulate_grad_batches = 8
 cfg.seed = {
     #"pretrain_ce": 20231121,
     #"pretrain_bce": 20230503,
@@ -58,7 +59,7 @@ cfg.epochs = {
 cfg.lr = {
     #"pretrain_ce": 3e-4,
     #"pretrain_bce": 1e-3,
-    "train_ce": 3e-4,
+    "train_ce": 1e-4,
     #"train_bce": 1e-3,
     #"finetune": 6e-4,
 }
@@ -103,7 +104,13 @@ cfg.hop_length = cfg.infer_duration * cfg.SR // (cfg.img_size - 1)
 cfg.normal = 255
 
 cfg.am_audio_transforms = amCompose([
-    AddBackgroundNoise(cfg.birdclef2021_nocall + cfg.birdclef2020_nocall + cfg.freefield + cfg.warblrb + cfg.birdvox + cfg.rainforest + cfg.environment, min_snr_in_db=3.0,max_snr_in_db=30.0,p=0.5),
+    AddBackgroundNoise(
+        cfg.birdclef2021_nocall + cfg.birdclef2020_nocall + cfg.freefield + cfg.warblrb + cfg.birdvox + cfg.rainforest + cfg.environment,
+        min_snr_in_db=3.0,
+        max_snr_in_db=30.0,
+        p=0.5,
+        lru_cache_size=cfg.background_noise_cache_size,
+    ),
     Gain(min_gain_in_db=-12, max_gain_in_db=12, p=0.2),
 
 ])
