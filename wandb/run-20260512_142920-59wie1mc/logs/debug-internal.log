@@ -1,0 +1,54 @@
+2026-05-12 14:29:20,034 INFO    StreamThr :175681 [internal.py:wandb_internal():86] W&B internal server running at pid: 175681, started at: 2026-05-12 14:29:20.033610
+2026-05-12 14:29:20,035 DEBUG   HandlerThread:175681 [handler.py:handle_request():144] handle_request: status
+2026-05-12 14:29:20,037 INFO    WriterThread:175681 [datastore.py:open_for_write():85] open: ./wandb/run-20260512_142920-59wie1mc/run-59wie1mc.wandb
+2026-05-12 14:29:20,037 DEBUG   SenderThread:175681 [sender.py:send():375] send: header
+2026-05-12 14:29:20,037 DEBUG   SenderThread:175681 [sender.py:send():375] send: run
+2026-05-12 14:29:20,039 INFO    SenderThread:175681 [sender.py:_maybe_setup_resume():761] checking resume status for None/BirdClef-2023/59wie1mc
+2026-05-12 14:29:20,437 ERROR   SenderThread:175681 [internal_api.py:execute():288] 401 response executing GraphQL.
+2026-05-12 14:29:20,437 ERROR   SenderThread:175681 [internal_api.py:execute():289] {"error":"api key too short"}
+2026-05-12 14:29:21,037 INFO    HandlerThread:175681 [handler.py:finish():842] shutting down handler
+2026-05-12 14:29:21,038 INFO    WriterThread:175681 [datastore.py:close():298] close: ./wandb/run-20260512_142920-59wie1mc/run-59wie1mc.wandb
+2026-05-12 14:29:21,038 ERROR   StreamThr :175681 [internal.py:wandb_internal():174] Thread SenderThread:
+Traceback (most recent call last):
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/lib/retry.py", line 131, in __call__
+    result = self._call_fn(*args, **kwargs)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 285, in execute
+    return self.client.execute(*args, **kwargs)  # type: ignore
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 52, in execute
+    result = self._get_result(document, *args, **kwargs)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 60, in _get_result
+    return self.transport.execute(document, *args, **kwargs)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/lib/gql_request.py", line 56, in execute
+    request.raise_for_status()
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/requests/models.py", line 1028, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 401 Client Error: Unauthorized for url: https://api.wandb.ai/graphql
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal_util.py", line 49, in run
+    self._run()
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal_util.py", line 100, in _run
+    self._process(record)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal.py", line 328, in _process
+    self._sm.send(record)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/sender.py", line 382, in send
+    send_handler(record)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/sender.py", line 946, in send_run
+    error = self._maybe_setup_resume(run)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/sender.py", line 764, in _maybe_setup_resume
+    resume_status = self._api.run_resume_status(
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/apis/normalize.py", line 73, in wrapper
+    raise err
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/apis/normalize.py", line 41, in wrapper
+    return func(*args, **kwargs)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 975, in run_resume_status
+    response = self.gql(
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 257, in gql
+    ret = self._retry_gql(
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/lib/retry.py", line 147, in __call__
+    retry_timedelta_triggered = check_retry_fn(e)
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/util.py", line 838, in no_retry_auth
+    raise AuthenticationError(
+wandb.errors.AuthenticationError: The API key you provided is either invalid or missing.  If the `WANDB_API_KEY` environment variable is set, make sure it is correct. Otherwise, to resolve this issue, you may try running the 'wandb login --relogin' command. If you are using a local server, make sure that you're using the correct hostname. If you're not sure, you can try logging in again using the 'wandb login --relogin --host [hostname]' command.(Error 401: Unauthorized)

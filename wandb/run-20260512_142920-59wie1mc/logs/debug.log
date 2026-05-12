@@ -1,0 +1,28 @@
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Current SDK version is 0.15.3
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Configure stats pid to 175627
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Loading settings from /home/nasneo/.config/wandb/settings
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Loading settings from /media/nasneo/AI/PyProject/birdclef2023-2nd-place-solution/wandb/settings
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Loading settings from environment variables: {'api_key': '***REDACTED***'}
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'train.py', 'program': '/media/nasneo/AI/PyProject/birdclef2023-2nd-place-solution/train.py'}
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:_log_setup():507] Logging user logs to ./wandb/run-20260512_142920-59wie1mc/logs/debug.log
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:_log_setup():508] Logging internal logs to ./wandb/run-20260512_142920-59wie1mc/logs/debug-internal.log
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:init():547] calling init triggers
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {}
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:init():596] starting backend
+2026-05-12 14:29:20,029 INFO    MainThread:175627 [wandb_init.py:init():600] setting up manager
+2026-05-12 14:29:20,031 INFO    MainThread:175627 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2026-05-12 14:29:20,032 INFO    MainThread:175627 [wandb_init.py:init():606] backend started and connected
+2026-05-12 14:29:20,033 INFO    MainThread:175627 [wandb_init.py:init():700] updated telemetry
+2026-05-12 14:29:20,036 INFO    MainThread:175627 [wandb_init.py:init():737] communicating run to backend with 60.0 second timeout
+2026-05-12 14:29:21,253 WARNING MsgRouterThr:175627 [router.py:message_loop():77] message_loop has been closed
+2026-05-12 14:29:30,255 ERROR   MainThread:175627 [wandb_init.py:init():1168] transport failed
+Traceback (most recent call last):
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/wandb_init.py", line 1150, in init
+    run = wi.init()
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/wandb_init.py", line 740, in init
+    result = run_init_handle.wait(
+  File "/home/nasneo/miniforge3/envs/BirdSound/lib/python3.10/site-packages/wandb/sdk/lib/mailbox.py", line 281, in wait
+    raise MailboxError("transport failed")
+wandb.sdk.lib.mailbox.MailboxError: transport failed
