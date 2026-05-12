@@ -14,6 +14,13 @@ fi
 SKIP_DONE="${SKIP_DONE:-1}"
 RUN_CONVERT="${RUN_CONVERT:-0}"
 USE_PSEUDO="${USE_PSEUDO:-0}"
+STAGE_ORDER=(
+  "pretrain_ce"
+  "pretrain_bce"
+  "train_ce"
+  "train_bce"
+  "finetune"
+)
 
 MODELS=(
   "sed_v2s"
@@ -33,10 +40,10 @@ run_stage() {
   local model="$1"
   local stage="$2"
   local ckpt_dir="outputs/${model}/pytorch/${stage}"
-  local ckpt_file="${ckpt_dir}/last.ckpt"
+  local done_file="${ckpt_dir}/done.json"
 
-  if [[ "$SKIP_DONE" == "1" && -f "$ckpt_file" ]]; then
-    echo "[skip] ${model} ${stage} -> ${ckpt_file}"
+  if [[ "$SKIP_DONE" == "1" && -f "$done_file" ]]; then
+    echo "[skip] ${model} ${stage} -> ${done_file}"
     return 0
   fi
 
@@ -53,7 +60,7 @@ run_stage() {
 
 enabled_stages() {
   local model="$1"
-  "$PYTHON_BIN" -c "import importlib; cfg = importlib.import_module('configs.${model}').basic_cfg; print(' '.join(cfg.seed.keys()))"
+  "$PYTHON_BIN" -c "import importlib; cfg = importlib.import_module('configs.${model}').basic_cfg; stage_order = ['pretrain_ce', 'pretrain_bce', 'train_ce', 'train_bce', 'finetune']; print(' '.join([stage for stage in stage_order if stage in cfg.seed]))"
 }
 
 for model in "${MODELS[@]}"; do

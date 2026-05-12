@@ -972,11 +972,30 @@ class BirdClefInferModelCNN(BirdClefTrainModelCNN):
         logits = self.head(x)
         return logits
 
+def _prefer_best_checkpoint(model_ckpt):
+    if model_ckpt is None:
+        return None
+
+    if os.path.exists(model_ckpt):
+        if os.path.basename(model_ckpt) == "last.ckpt":
+            best_ckpt = os.path.join(os.path.dirname(model_ckpt), "best.ckpt")
+            if os.path.exists(best_ckpt):
+                return best_ckpt
+        return model_ckpt
+
+    if os.path.basename(model_ckpt) == "last.ckpt":
+        best_ckpt = os.path.join(os.path.dirname(model_ckpt), "best.ckpt")
+        if os.path.exists(best_ckpt):
+            return best_ckpt
+
+    return model_ckpt
+
 def load_model(cfg,stage,train=True):
     if train:
         model_ckpt = cfg.model_ckpt[stage]
     else:
         model_ckpt = cfg.final_model_path
+    model_ckpt = _prefer_best_checkpoint(model_ckpt)
 
     if model_ckpt is not None:
         state_dict = torch.load(model_ckpt,map_location=cfg.DEVICE)['state_dict']

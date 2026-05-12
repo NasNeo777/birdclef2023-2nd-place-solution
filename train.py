@@ -9,6 +9,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint, BackboneFinetuning, Ear
 import torch
 import os
 import gc
+import json
+from datetime import datetime
 from modules.pseudo import load_pseudo_labels
 
 def make_parser():
@@ -69,18 +71,21 @@ def main():
     )
 
     logger = WandbLogger(project='BirdClef-2023', name=f'{model_name}_{stage}')
+    os.makedirs(cfg.output_path[stage], exist_ok=True)
+    done_path = os.path.join(cfg.output_path[stage], "done.json")
+    if os.path.exists(done_path):
+        os.remove(done_path)
     checkpoint_callback = ModelCheckpoint(
-        #monitor='val_loss',
-        monitor=None,
+        monitor="validation C-MAP score pad 5",
         dirpath= cfg.output_path[stage],
-        save_top_k=0,
+        filename="best",
+        auto_insert_metric_name=False,
+        save_top_k=1,
         save_last= True,
         save_weights_only=True,
-        #filename= './ckpt_epoch_{epoch}_val_loss_{val_loss:.2f}',
-        #filename ='./ckpt_{epoch}_{val_loss}',
         verbose= True,
         every_n_epochs=1,
-        mode='min'
+        mode='max'
     )
     callbacks_to_use = [checkpoint_callback]
     model = load_model(cfg,stage)
@@ -100,6 +105,22 @@ def main():
 
     print("Running trainer.fit")
     trainer.fit(model, train_dataloaders = dl_train, val_dataloaders = dl_val)
+
+    done_payload = {
+        "model_name": model_name,
+        "stage": stage,
+        "completed_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "epochs": cfg.epochs[stage],
+        "best_model_path": checkpoint_callback.best_model_path or "",
+        "best_model_score": (
+            float(checkpoint_callback.best_model_score.item())
+            if checkpoint_callback.best_model_score is not None
+            else None
+        ),
+        "last_model_path": checkpoint_callback.last_model_path or "",
+    }
+    with open(done_path, "w") as f:
+        json.dump(done_payload, f, indent=2)
 
     gc.collect()
     torch.cuda.empty_cache()
