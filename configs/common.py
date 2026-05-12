@@ -10,15 +10,15 @@ cfg.label_smoothing = 0.1
 cfg.weight_decay = 1e-3
 cfg.SR = 32000
 cfg.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-cfg.primary_label_col = 'primary_label_2023'
-cfg.secondary_labels_col = 'secondary_labels_2023'
+cfg.primary_label_col = 'primary_label'
+cfg.secondary_labels_col = 'secondary_labels'
 cfg.background_duration_thre = 60
 cfg.pseudo_label_path = 'inputs/pseudo_label'
 cfg.hand_label_path = 'inputs/hand_label'
 
-cfg.train_data = 'inputs/train.csv'
-cfg.train_dir = 'inputs/train_audios'
-cfg.test_dir = 'inputs/test_audios'
+cfg.train_data = '/media/nasneo/AI/datas/bird/train.csv'
+cfg.train_dir = '/media/nasneo/AI/datas/bird/train_audio'
+cfg.test_dir = '/media/nasneo/AI/datas/bird/test_audio'
 
 cfg.birdclef2021_nocall = glob.glob("inputs/background_noise/birdclef2021_nocall/*")
 cfg.birdclef2020_nocall = glob.glob("inputs/background_noise/birdclef2020_nocall/*")

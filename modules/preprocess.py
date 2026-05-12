@@ -48,10 +48,19 @@ def preprocess(cfg):
     df['secondary_labels_2023'] = df['secondary_labels_2023'].apply(lambda x: literal_eval(x))
     df['secondary_labels_strict'] = df['secondary_labels_strict'].apply(lambda x: literal_eval(x))
     df['secondary_labels_very_strict'] = df['secondary_labels_very_strict'].apply(lambda x: literal_eval(x))
-    df['version'] = df['version'].astype(str)
-    df['rating'] = df['rating'].mask(np.isnan(df['rating'].values),df['q'].map({'A':5,'B':4,'C':3,'D':2,'E':1,'no score':0}))
-    df['filename'] = df['id'].apply(lambda x: f'XC{x}')
-    df['path'] = df['id'].apply(lambda x: os.path.join(cfg.train_dir,f'XC{x}.ogg'))
+    df['version'] = df['collection'].astype(str) if 'collection' in df.columns else '2023'
+    df['rating'] = df['rating'].mask(np.isnan(df['rating'].values),df.get('q', pd.Series([np.nan]*len(df))).map({'A':5,'B':4,'C':3,'D':2,'E':1,'no score':0}))
+    if 'filename' not in df.columns:
+        df['filename'] = df['id'].apply(lambda x: f'XC{x}.ogg')
+    
+    # In user dataset, filename already contains the path inside train_audio/
+    df['path'] = df['filename'].apply(lambda x: os.path.join(cfg.train_dir, x))
+    
+    # Handle missing duration
+    if 'duration' not in df.columns:
+        print("warning: 'duration' column not found, setting default to 30.0s")
+        df['duration'] = 30.0
+
     # ensure all the train data is available
     if not df['path'].apply(lambda x:os.path.exists(x)).all():
         print('===========================================================')
