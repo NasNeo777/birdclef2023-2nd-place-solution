@@ -37,10 +37,10 @@ def main():
 
     if use_pseudo:
         # =========================================================
-        with open('/content/birdclef2023-2nd-place-solution/inputs/pseudo_label/pseudo.json') as f:
+        with open(os.path.join(cfg.pseudo_label_path, 'pseudo.json')) as f:
             pseudo = json.loads(f.read())
 
-        with open('/content/birdclef2023-2nd-place-solution/inputs/hand_label/hand_label.json') as f:
+        with open(os.path.join(cfg.hand_label_path, 'hand_label.json')) as f:
             hand_label = json.loads(f.read())
 
         for version in hand_label['pred'].keys():
