@@ -26,6 +26,8 @@ cfg.secondary_labels_col = 'secondary_labels'
 cfg.background_duration_thre = 60
 cfg.pseudo_label_path = 'inputs/pseudo_label'
 cfg.hand_label_path = 'inputs/hand_label'
+cfg.pseudo_version_aliases = {}
+cfg.dynamic_bird_cols = True
 
 cfg.train_data = '/media/nasneo/AI/datas/bird/train.csv'
 cfg.train_dir = '/media/nasneo/AI/datas/bird/train_audio'

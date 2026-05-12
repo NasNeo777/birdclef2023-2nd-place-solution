@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, BackboneFinetuning, Ear
 import torch
 import os
 import gc
-import json
+from modules.pseudo import load_pseudo_labels
 
 def make_parser():
     parser = argparse.ArgumentParser(description='parser')
@@ -45,24 +45,15 @@ def main():
         pseudo_file = os.path.join(cfg.pseudo_label_path, 'pseudo.json')
         hand_label_file = os.path.join(cfg.hand_label_path, 'hand_label.json')
 
-        if not os.path.exists(pseudo_file) or not os.path.exists(hand_label_file):
+        if not os.path.exists(pseudo_file):
             print(f"Warning: Pseudo label files not found at {cfg.pseudo_label_path}")
             use_pseudo = False
             pseudo = None
         else:
-            with open(pseudo_file) as f:
-                pseudo = json.loads(f.read())
-
-            with open(hand_label_file) as f:
-                hand_label = json.loads(f.read())
-
-            for version in hand_label['pred'].keys():
-                for filename in hand_label['pred'][version].keys():
-                    for label in hand_label['pred'][version][filename].keys():
-                        for second in hand_label['pred'][version][filename][label].keys():
-                            for i in range(len(pseudo['subset1']['pseudo'])):
-                                if second in pseudo['subset1']['pseudo'][i]['pred'][version][filename][label].keys():
-                                    pseudo['subset1']['pseudo'][i]['pred'][version][filename][label][second] = hand_label['pred'][version][filename][label][second]
+            pseudo = load_pseudo_labels(
+                pseudo_file,
+                hand_label_file if os.path.exists(hand_label_file) else None,
+            )
         # =========================================================
 
 

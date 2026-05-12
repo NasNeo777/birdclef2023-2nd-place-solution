@@ -4,6 +4,7 @@ import soundfile as sf
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from modules.utils import crop_or_pad
+from modules.pseudo import normalize_audio_key
 import multiprocessing
 
 class BirdTrainDataset(Dataset):
@@ -27,11 +28,73 @@ class BirdTrainDataset(Dataset):
 
         self.df["weight"] = np.clip(self.df["rating"] / self.df["rating"].max(), 0.1, 1.0)
         self.pseudo = pseudo
+        self.pseudo_version_aliases = self._build_version_aliases(
+            getattr(cfg, "pseudo_version_aliases", {})
+        )
+        self.pseudo_entries_by_version = self._build_pseudo_index(pseudo)
 
         self.transforms = transforms
 
     def __len__(self):
         return len(self.df)
+
+    def _build_version_aliases(self, aliases):
+        version_aliases = {}
+        for version, candidates in aliases.items():
+            if isinstance(candidates, (list, tuple, set)):
+                values = [str(candidate) for candidate in candidates]
+            else:
+                values = [str(candidates)]
+            version_aliases[str(version)] = values
+        return version_aliases
+
+    def _iter_pseudo_groups(self, pseudo):
+        if not isinstance(pseudo, dict):
+            return
+
+        if "pseudo" in pseudo and isinstance(pseudo["pseudo"], list):
+            yield pseudo
+            return
+
+        for group in pseudo.values():
+            if isinstance(group, dict) and "pseudo" in group and isinstance(group["pseudo"], list):
+                yield group
+
+    def _build_pseudo_index(self, pseudo):
+        if pseudo is None:
+            return {}
+
+        entries_by_version = {}
+        for group in self._iter_pseudo_groups(pseudo):
+            weights = group.get("weight", [])
+            for idx, oof in enumerate(group.get("pseudo", [])):
+                weight = weights[idx] if idx < len(weights) else 1.0
+                thresholds = oof.get("thre", {})
+                for version, file_preds in oof.get("pred", {}).items():
+                    normalized_map = {
+                        normalize_audio_key(file_key): file_key for file_key in file_preds.keys()
+                    }
+                    entries_by_version.setdefault(str(version), []).append(
+                        {
+                            "pred": file_preds,
+                            "file_key_map": normalized_map,
+                            "thre": thresholds,
+                            "weight": weight,
+                        }
+                    )
+        return entries_by_version
+
+    def _get_pseudo_entries(self, version):
+        version = str(version)
+        candidates = [version] + self.pseudo_version_aliases.get(version, [])
+        entries = []
+        seen = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            entries.extend(self.pseudo_entries_by_version.get(candidate, []))
+        return entries
 
     def adjust_label(self,labels,filename,sample_ends,target,version,pseudo,pseudo_weights):
         adjust_label = {label:0 for label in labels if label in self.cfg.bird_cols}
@@ -59,6 +122,59 @@ class BirdTrainDataset(Dataset):
           elif adjust_label[label]<=0.75:
             adjust_label[label] = 0.6
           target[label] = target[label] * adjust_label[label]
+        return target
+
+    def apply_pseudo_labels(self, labels, filename, sample_ends, target, version):
+        adjust_label = {label: 0 for label in labels if label in self.cfg.bird_cols}
+        labels_comp = list(adjust_label.keys())
+        normalized_filename = normalize_audio_key(filename)
+        pseudo_entries = self._get_pseudo_entries(version)
+
+        if not pseudo_entries or not labels_comp:
+            return target
+
+        for entry in pseudo_entries:
+            raw_filename = entry["file_key_map"].get(normalized_filename)
+            if raw_filename is None:
+                continue
+
+            file_preds = entry["pred"].get(raw_filename, {})
+            thresholds = entry["thre"]
+            weight = entry["weight"]
+            for label in labels_comp:
+                label_preds = file_preds.get(label)
+                thre = thresholds.get(label)
+                if not label_preds or thre is None:
+                    continue
+
+                preds = [
+                    label_preds[sample_end]
+                    for sample_end in sample_ends
+                    if sample_end in label_preds
+                ]
+                if not preds:
+                    continue
+
+                adjusts = np.zeros(shape=(len(preds),))
+                for i, pred in enumerate(preds):
+                    q3, q2, q1 = thre["q3"], thre["q2"], thre["q1"]
+                    if pred >= q3:
+                        adjust = 1.0
+                    elif pred >= q2:
+                        adjust = 0.9
+                    elif pred >= q1:
+                        adjust = 0.5
+                    else:
+                        adjust = 0.2
+                    adjusts[i] = adjust
+                adjust_label[label] += weight * (1 - np.prod(1 - adjusts))
+
+        for label in labels_comp:
+            if adjust_label[label] <= 0.6:
+                adjust_label[label] = 0.01
+            elif adjust_label[label] <= 0.75:
+                adjust_label[label] = 0.6
+            target[label] = target[label] * adjust_label[label]
         return target
 
     def _read_audio(self, filepath, offset=0.0, duration=None):
@@ -129,14 +245,7 @@ class BirdTrainDataset(Dataset):
             sample_ends = [str(nearest_offset+(i+1)*self.cfg.infer_duration) for i in range(int(work_duration/self.cfg.infer_duration)) if nearest_offset+(i+1)*self.cfg.infer_duration<=pseudo_max_end]
             # use pseudo and hand label if the total duration of the audio is larger than clip duration
             if (work_duration < duration)&(self.pseudo is not None):
-              if (version=='2023') | (version=='add') | (version=='scrap') | (version=='scrap_add') | (version=='scrap_add_add'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset1']['pseudo'],self.pseudo['subset1']['weight'])
-              elif (version=='scrap_data'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset2']['pseudo'],self.pseudo['subset2']['weight'])
-              elif (version=='scrap_data_add'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset3']['pseudo'],self.pseudo['subset3']['weight'])
-              elif (version=='scrap_data_0515'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset4']['pseudo'],self.pseudo['subset4']['weight'])
+              target = self.apply_pseudo_labels(labels,filename,sample_ends,target,version)
 
         else:
             audio, orig_sr = self._read_audio(filepath, offset=0, duration=self.cfg.valid_duration)
@@ -161,14 +270,7 @@ class BirdTrainDataset(Dataset):
             sample_ends = [str(sample_end-i*self.cfg.infer_duration) for i in range(valid_len) if sample_end-i*self.cfg.infer_duration>0]
 
             if (work_duration < duration)&(self.pseudo is not None):
-              if (version=='2023') | (version=='add') | (version=='scrap') | (version=='scrap_add') | (version=='scrap_add_add'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset1']['pseudo'],self.pseudo['subset1']['weight'])
-              elif (version=='scrap_data'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset2']['pseudo'],self.pseudo['subset2']['weight'])
-              elif (version=='scrap_data_add'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset3']['pseudo'],self.pseudo['subset3']['weight'])
-              elif (version=='scrap_data_0515'):
-                target = self.adjust_label(labels,filename,sample_ends,target,version,self.pseudo['subset4']['pseudo'],self.pseudo['subset4']['weight'])
+              target = self.apply_pseudo_labels(labels,filename,sample_ends,target,version)
 
         audio_sample = torch.tensor(audio_sample[np.newaxis]).float()
 

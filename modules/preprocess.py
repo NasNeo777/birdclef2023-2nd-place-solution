@@ -91,6 +91,30 @@ def train_test_split(df, df_labels, cfg):
     df_labels_valid = df_labels.loc[valid_mask].reset_index(drop=True)
     return df_train, df_valid, df_labels_train, df_labels_valid
 
+def _infer_bird_cols_from_df(df, cfg):
+    bird_cols = []
+    seen = set()
+
+    def add_label(label):
+        if not isinstance(label, str):
+            return
+        label = label.strip()
+        if not label or label == "soundscape" or label in seen:
+            return
+        seen.add(label)
+        bird_cols.append(label)
+
+    for primary_label in df[cfg.primary_label_col].values:
+        add_label(primary_label)
+
+    for secondary_labels in df[cfg.secondary_labels_col].values:
+        if not isinstance(secondary_labels, (list, tuple, set)):
+            continue
+        for secondary_label in secondary_labels:
+            add_label(secondary_label)
+
+    return bird_cols
+
 def preprocess(cfg):
     def transforms(audio):
         audio = cfg.np_audio_transforms(audio)
@@ -105,6 +129,13 @@ def preprocess(cfg):
     for col in ['secondary_labels', 'secondary_labels_2023', 'secondary_labels_strict', 'secondary_labels_very_strict']:
         if col in df.columns:
             df[col] = df[col].apply(lambda x: literal_eval(x) if isinstance(x, str) else x)
+
+    if getattr(cfg, "dynamic_bird_cols", False):
+        dynamic_bird_cols = _infer_bird_cols_from_df(df, cfg)
+        if dynamic_bird_cols:
+            cfg.bird_cols_train = dynamic_bird_cols
+            cfg.bird_cols_pretrain = dynamic_bird_cols
+            cfg.bird_cols = dynamic_bird_cols
     
     df['version'] = df['collection'].astype(str) if 'collection' in df.columns else '2023'
     df['rating'] = df['rating'].mask(np.isnan(df['rating'].values),df.get('q', pd.Series([np.nan]*len(df))).map({'A':5,'B':4,'C':3,'D':2,'E':1,'no score':0}))
