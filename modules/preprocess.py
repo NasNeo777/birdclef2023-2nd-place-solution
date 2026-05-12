@@ -4,6 +4,13 @@ from ast import literal_eval
 import torch
 import os
 
+def _resolve_stage_value(value, stage, name):
+    if isinstance(value, dict):
+        if stage not in value:
+            raise KeyError(f"{name} is missing a value for stage '{stage}'")
+        value = value[stage]
+    return value
+
 def prepare_cfg(cfg,stage):
     if stage in ["pretrain_ce","pretrain_bce"]:
         cfg.bird_cols = cfg.bird_cols_pretrain
@@ -19,6 +26,15 @@ def prepare_cfg(cfg,stage):
         cfg.DURATION = cfg.DURATION_TRAIN
     else:
         raise NotImplementedError
+
+    cfg.batch_size = int(_resolve_stage_value(cfg.batch_size, stage, "batch_size"))
+    cfg.accumulate_grad_batches = int(
+        _resolve_stage_value(
+            getattr(cfg, "accumulate_grad_batches", 1),
+            stage,
+            "accumulate_grad_batches",
+        )
+    )
 
     cfg.test_batch_size = int(
         np.max([int(cfg.batch_size / (int(cfg.valid_duration) / cfg.DURATION)), 2])

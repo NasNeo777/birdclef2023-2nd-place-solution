@@ -28,9 +28,13 @@ cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
 
 
-cfg.batch_size = 16
+cfg.batch_size = {
+    "train_ce": 16,
+}
 cfg.PRECISION = 32
-cfg.accumulate_grad_batches = 8
+cfg.accumulate_grad_batches = {
+    "train_ce": 8,
+}
 cfg.seed = {
     #"pretrain_ce": 20231121,
     #"pretrain_bce": 20230503,
