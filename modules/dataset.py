@@ -9,7 +9,7 @@ class BirdTrainDataset(Dataset):
 
     def __init__(self, df, df_labels, cfg, res_type="kaiser_fast",resample=True, train = True, pseudo=None, transforms=None):
         self.cfg =cfg
-        self.df = df
+        self.df = df.copy()
         self.df_labels = df_labels
         self.sr = cfg.SR
         self.n_mels = cfg.n_mels
@@ -24,7 +24,8 @@ class BirdTrainDataset(Dataset):
         self.res_type = res_type
         self.resample = resample
 
-        self.df["weight"] = np.clip(self.df["rating"] / self.df["rating"].max(), 0.1, 1.0)
+        max_rating = max(float(self.df["rating"].max()), 1.0) if len(self.df) else 1.0
+        self.df["weight"] = np.clip(self.df["rating"] / max_rating, 0.1, 1.0)
         self.pseudo = pseudo
 
         self.transforms = transforms
@@ -62,11 +63,44 @@ class BirdTrainDataset(Dataset):
 
     def load_data(self, filepath,target,row):
         filename = row['filename']
-        labels = [bird for bird in list(set([row[self.cfg.primary_label_col]] + row[self.cfg.secondary_labels_col])) if bird in self.cfg.bird_cols]
-        secondary_labels = [bird for bird in row[self.cfg.secondary_labels_col] if bird in self.cfg.bird_cols]
+        if "labels" in row.index:
+            labels = [bird for bird in row["labels"] if bird in self.cfg.bird_cols]
+            secondary_labels = []
+        else:
+            labels = [bird for bird in list(set([row[self.cfg.primary_label_col]] + row[self.cfg.secondary_labels_col])) if bird in self.cfg.bird_cols]
+            secondary_labels = [bird for bird in row[self.cfg.secondary_labels_col] if bird in self.cfg.bird_cols]
         duration = row['duration']
         version = row['version']
         presence = row['presence_type']
+
+        if getattr(self.cfg, "fixed_clip_mode", False) and "clip_start_sec" in row.index:
+            offset = float(row["clip_start_sec"])
+            clip_duration = float(row.get("clip_duration", self.duration))
+            audio_sample, orig_sr = lb.load(
+                filepath, sr=None, mono=True, offset=offset, duration=clip_duration
+            )
+            if self.resample and orig_sr != self.sr:
+                audio_sample = lb.resample(
+                    audio_sample, orig_sr, self.sr, res_type=self.res_type
+                )
+
+            if self.transforms is not None and self.train:
+                audio_sample = self.transforms(audio_sample)
+
+            audio_sample = crop_or_pad(
+                audio_sample, length=self.audio_length, is_train=self.train
+            )
+
+            if self.train:
+                audio_sample = audio_sample[np.newaxis]
+            else:
+                audio_sample = audio_sample[np.newaxis, np.newaxis]
+
+            audio_sample = torch.tensor(audio_sample).float()
+            target = target.values
+            if not self.train:
+                target[target>0] = 1
+            return audio_sample, target
 
         # self mixup
         self_mixup_part = 1

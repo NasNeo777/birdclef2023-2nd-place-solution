@@ -1,5 +1,8 @@
 import argparse
 import importlib
+from pathlib import Path
+import warnings
+import os
 from modules.preprocess import preprocess,prepare_cfg
 from modules.dataset import get_train_dataloader
 from modules.model import load_model
@@ -7,14 +10,48 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, BackboneFinetuning, EarlyStopping
 import torch
-import os
+import wandb
 import gc
 import json
 
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("WANDB_SILENT", "true")
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*had to be resampled from .* hz to .* hz\. This hurt execution time\.",
+    module=r"audiomentations\.core\.audio_loading_utils",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Transforms now expect an `output_type` argument.*",
+    module=r"torch_audiomentations\..*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Argument 'onesided' has been deprecated.*",
+    module=r"torchaudio\..*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*isinstance\(treespec, LeafSpec\) is deprecated.*",
+    module=r"pytorch_lightning\.utilities\._pytree",
+)
+
+torch.set_float32_matmul_precision("medium")
+
+
+def resolve_repo_path(repo_root, path_str):
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    return repo_root / path
+
+
 def make_parser():
     parser = argparse.ArgumentParser(description='parser')
-    parser.add_argument('--stage', choices=["pretrain_ce","pretrain_bce","train_ce","train_bce","finetune"])
-    parser.add_argument('--model_name', choices=["sed_v2s",'sed_b3ns','sed_seresnext26t','cnn_v2s','cnn_resnet34d','cnn_b3ns','cnn_b0ns'])
+    parser.add_argument('--stage', required=True, choices=["pretrain_ce","pretrain_bce","train_ce","train_bce","finetune"])
+    parser.add_argument('--model_name', required=True, choices=["sed_v2s",'sed_b3ns','sed_seresnext26t','cnn_v2s','cnn_resnet34d','cnn_b3ns','cnn_b0ns'])
     parser.add_argument('--use_pseudo', action='store_true')
     return parser
 
@@ -22,6 +59,7 @@ def make_parser():
 def main():
     parser = make_parser()
     args = parser.parse_args()
+    repo_root = Path(__file__).resolve().parent
     stage = args.stage
     model_name = args.model_name
     use_pseudo = args.use_pseudo
@@ -29,7 +67,11 @@ def main():
     cfg = prepare_cfg(cfg,stage)
     os.environ['WANDB_API_KEY'] = cfg.WANDB_API_KEY
 
-    pl.seed_everything(cfg.seed[stage], workers=True)
+    if use_pseudo and not getattr(cfg, "allow_pseudo", True):
+        raise ValueError("Pseudo-label training is not implemented for the 2026 soundscape dataset")
+
+    seed = int(cfg.seed[stage]) % (2**32)
+    pl.seed_everything(seed, workers=True)
 
     df_train, df_valid, df_label_train, df_label_valid, sample_weight, transforms = preprocess(cfg)
 
@@ -37,11 +79,21 @@ def main():
 
     if use_pseudo:
         # =========================================================
-        with open('/content/birdclef2023-2nd-place-solution/inputs/pseudo_label/pseudo.json') as f:
+        pseudo_path = resolve_repo_path(repo_root, cfg.pseudo_label_path) / "pseudo.json"
+        hand_label_path = resolve_repo_path(repo_root, cfg.hand_label_path) / "hand_label.json"
+
+        with pseudo_path.open() as f:
             pseudo = json.loads(f.read())
 
-        with open('/content/birdclef2023-2nd-place-solution/inputs/hand_label/hand_label.json') as f:
+        with hand_label_path.open() as f:
             hand_label = json.loads(f.read())
+
+        if "subset1" not in pseudo:
+            raise ValueError(f"{pseudo_path} does not contain subset1 pseudo labels")
+        if "pred" not in hand_label:
+            raise ValueError(f"{hand_label_path} does not contain pred labels")
+        if "2023" not in hand_label["pred"]:
+            raise ValueError(f"{hand_label_path} does not contain 2023 labels")
 
         for version in hand_label['pred'].keys():
             for filename in hand_label['pred'][version].keys():
@@ -63,7 +115,11 @@ def main():
         transforms
     )
 
-    logger = WandbLogger(project='BirdClef-2023', name=f'{model_name}_{stage}')
+    logger = WandbLogger(
+        project=f'BirdClef-{cfg.dataset_version}',
+        name=f'{model_name}_{stage}',
+        settings=wandb.Settings(quiet=True, console="off"),
+    )
     checkpoint_callback = ModelCheckpoint(
         #monitor='val_loss',
         monitor=None,
@@ -84,6 +140,7 @@ def main():
         val_check_interval=1.0,
         deterministic=None,
         max_epochs=cfg.epochs[stage],
+        log_every_n_steps=1,
         logger=logger,
         callbacks=callbacks_to_use,
         precision=cfg.PRECISION, accelerator="auto",

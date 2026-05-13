@@ -10,6 +10,14 @@ import sklearn
 import timm
 import torchaudio
 import os
+
+# torch_audiomentations 0.11 expects older torchaudio globals that were removed
+# in newer releases. Provide no-op fallbacks before importing it.
+if not hasattr(torchaudio, "set_audio_backend"):
+    torchaudio.set_audio_backend = lambda *args, **kwargs: None
+if not hasattr(torchaudio, "USE_SOUNDFILE_LEGACY_INTERFACE"):
+    torchaudio.USE_SOUNDFILE_LEGACY_INTERFACE = False
+
 from torch_audiomentations import Compose, PitchShift, Shift, OneOf, AddColoredNoise
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
@@ -380,6 +388,8 @@ class BirdClefModelBase(pl.LightningModule):
             mix_beta=self.cfg.mix_beta2, mixup2_prob=self.cfg.mixup2_prob
         )
         self.ema = None
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
 
         self.audio_transforms = Compose(
             [
@@ -389,9 +399,11 @@ class BirdClefModelBase(pl.LightningModule):
                     max_transpose_semitones=4,
                     sample_rate=self.cfg.SR,
                     p=0.4,
+                    output_type="tensor",
                 ),
-                Shift(min_shift=-0.5, max_shift=0.5, p=0.4),
-            ]
+                Shift(min_shift=-0.5, max_shift=0.5, p=0.4, output_type="tensor"),
+            ],
+            output_type="tensor",
         )
 
         self.time_mask_transform = torchaudio.transforms.TimeMasking(
@@ -412,7 +424,6 @@ class BirdClefModelBase(pl.LightningModule):
             center=True,
             pad_mode="constant",
             norm="slaney",
-            onesided=True,
             mel_scale="slaney",
         )
 
@@ -512,6 +523,7 @@ class BirdClefModelBase(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         self.freeze()
         y_pred, target, loss = self(batch)
+        self.training_step_outputs.append({"loss": loss.detach()})
 
         # self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -524,6 +536,13 @@ class BirdClefModelBase(pl.LightningModule):
             y_pred, target, val_loss = self(batch)
         # print(y_pred)
         # self.log("val_loss", val_loss, on_step=True, on_epoch=True, logger=True, prog_bar=True)
+        self.validation_step_outputs.append(
+            {
+                "val_loss": val_loss.detach(),
+                "logits": y_pred.detach(),
+                "targets": target.detach(),
+            }
+        )
 
         return {"val_loss": val_loss, "logits": y_pred, "targets": target}
 
@@ -533,7 +552,8 @@ class BirdClefModelBase(pl.LightningModule):
     def validation_dataloader(self):
         return self._validation_dataloader
 
-    def on_validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self.validation_step_outputs
         if len(outputs):
             avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
             output_val = (
@@ -613,20 +633,25 @@ class BirdClefModelBase(pl.LightningModule):
         else:
             avg_loss = 0
             avg_score = 0
+        self.validation_step_outputs.clear()
         return {"val_loss": avg_loss, "val_cmap": avg_score}
 
-    def on_train_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
+        outputs = self.training_step_outputs
+        if not len(outputs):
+            return
         avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
         self.log("train_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
         if (self.ema is not None) & ((self.current_epoch > self.epochs - 3 - 1)):
-            if not os.path.exists(self.cfg.output_path[stage]):
-                os.makedirs(self.cfg.output_path[stage])
+            if not os.path.exists(self.cfg.output_path[self.stage]):
+                os.makedirs(self.cfg.output_path[self.stage])
             torch.save(
                 {
                     "state_dict": self.ema.module.state_dict(),
                 },
-                os.path.join(self.cfg.output_path[stage], f"ema_{self.current_epoch}.ckpt"),
+                os.path.join(self.cfg.output_path[self.stage], f"ema_{self.current_epoch}.ckpt"),
             )
+        self.training_step_outputs.clear()
 
 
 class BirdClefTrainModelSED(BirdClefModelBase):
@@ -980,5 +1005,3 @@ def load_model(cfg,stage,train=True):
     if not train:
         model.eval()
     return model
-
-

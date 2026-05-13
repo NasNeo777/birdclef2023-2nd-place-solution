@@ -103,7 +103,7 @@ cfg.hop_length = cfg.infer_duration * cfg.SR // (cfg.img_size - 1)
 cfg.normal = 80
 
 cfg.am_audio_transforms = amCompose([
-    AddBackgroundNoise(cfg.birdclef2021_nocall + cfg.birdclef2020_nocall + cfg.freefield + cfg.warblrb + cfg.birdvox + cfg.rainforest + cfg.environment, min_snr_in_db=3.0,max_snr_in_db=30.0,p=0.6),
+    AddBackgroundNoise(cfg.birdclef2021_nocall + cfg.birdclef2020_nocall + cfg.freefield + cfg.warblrb + cfg.birdvox + cfg.rainforest + cfg.environment, min_snr_in_db=3.0,max_snr_in_db=30.0,p=0.6, lru_cache_size=cfg.background_noise_cache_size),
     Gain(min_gain_in_db=-12, max_gain_in_db=12, p=0.4),
 
 ])

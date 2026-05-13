@@ -1,9 +1,16 @@
+import csv
 from types import SimpleNamespace
 import glob
+from pathlib import Path
 import torch
 
+
+def load_class_names(sample_submission_path):
+    with open(sample_submission_path, newline="") as f:
+        return next(csv.reader(f))[1:]
+
 cfg = SimpleNamespace(**{})
-cfg.WANDB_API_KEY = 'your key'
+cfg.WANDB_API_KEY = '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'
 cfg.infer_duration = 5
 cfg.valid_duration = 60
 cfg.label_smoothing = 0.1
@@ -15,10 +22,18 @@ cfg.secondary_labels_col = 'secondary_labels_2023'
 cfg.background_duration_thre = 60
 cfg.pseudo_label_path = 'inputs/pseudo_label'
 cfg.hand_label_path = 'inputs/hand_label'
+cfg.background_noise_cache_size = 128
+cfg.train_labels = None
+cfg.dataset_version = "2023"
+cfg.fixed_clip_mode = False
+cfg.allow_pseudo = True
+cfg.valid_split = 0.0
 
 cfg.train_data = 'inputs/train.csv'
 cfg.train_dir = 'inputs/train_audios'
 cfg.test_dir = 'inputs/test_audios'
+cfg.train_audio_dir = cfg.train_dir
+cfg.train_audio_duration_cache = "outputs/cache/train_audio_durations_2026.csv"
 
 cfg.birdclef2021_nocall = glob.glob("inputs/background_noise/birdclef2021_nocall/*")
 cfg.birdclef2020_nocall = glob.glob("inputs/background_noise/birdclef2020_nocall/*")
@@ -1131,5 +1146,22 @@ cfg.bird_cols_pretrain = [
     "yewgre1",
     "zebdov",
 ]
+
+bird_data_root = Path("/media/nasneo/AI/datas/bird")
+sample_submission_path = bird_data_root / "sample_submission.csv"
+if sample_submission_path.exists():
+    cfg.dataset_version = "2026"
+    cfg.primary_label_col = "labels"
+    cfg.secondary_labels_col = "secondary_labels"
+    cfg.train_data = str(bird_data_root / "train.csv")
+    cfg.train_labels = str(bird_data_root / "train_soundscapes_labels.csv")
+    cfg.train_dir = str(bird_data_root / "train_soundscapes")
+    cfg.train_audio_dir = str(bird_data_root / "train_audio")
+    cfg.test_dir = str(bird_data_root / "test_soundscapes")
+    cfg.fixed_clip_mode = True
+    cfg.allow_pseudo = False
+    cfg.valid_split = 0.1
+    cfg.bird_cols_train = load_class_names(sample_submission_path)
+    cfg.bird_cols_pretrain = list(cfg.bird_cols_train)
 
 common_cfg = cfg

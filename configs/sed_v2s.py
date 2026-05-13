@@ -110,15 +110,21 @@ cfg.am_audio_transforms = amCompose(
             min_snr_in_db=0,
             max_snr_in_db=3,
             p=0.6,
+            lru_cache_size=cfg.background_noise_cache_size,
         ),
         AddBackgroundNoise(
             cfg.freefield + cfg.warblrb + cfg.birdvox,
             min_snr_in_db=0,
             max_snr_in_db=3,
             p=0.3,
+            lru_cache_size=cfg.background_noise_cache_size,
         ),
         AddBackgroundNoise(
-            cfg.rainforest + cfg.environment, min_snr_in_db=0, max_snr_in_db=3, p=0.4
+            cfg.rainforest + cfg.environment,
+            min_snr_in_db=0,
+            max_snr_in_db=3,
+            p=0.4,
+            lru_cache_size=cfg.background_noise_cache_size,
         ),
         amOneOf(
             [
