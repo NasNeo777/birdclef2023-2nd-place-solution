@@ -585,7 +585,6 @@ class BirdClefModelBase(pl.LightningModule):
             pred_df = pd.DataFrame(output_val, columns=self.birds)
             if self.current_epoch > -1:
                 avg_score = birdclef2026_metric(val_df, pred_df)
-                avg_score2 = birdclef2026_metric(val_df, (pred_df > 0.5).astype(float))
                 self.log(
                     "val_loss",
                     avg_loss,
@@ -602,20 +601,9 @@ class BirdClefModelBase(pl.LightningModule):
                     logger=True,
                     prog_bar=True,
                 )
-                self.log(
-                    "val_roc_auc_bin",
-                    avg_score2,
-                    on_step=False,
-                    on_epoch=True,
-                    logger=True,
-                    prog_bar=False,
-                )
                 print(f"epoch {self.current_epoch} validation loss {avg_loss}")
                 print(
                     f"epoch {self.current_epoch} validation ROC-AUC {avg_score}"
-                )
-                print(
-                    f"epoch {self.current_epoch} validation ROC-AUC (binary) {avg_score2}"
                 )
             else:
                 self.log(
