@@ -10,22 +10,6 @@ import sklearn
 import timm
 import torchaudio
 import os
-
-# torch_audiomentations 0.11 expects legacy torchaudio backend helpers at the
-# package top level. Recent torchaudio releases removed them because backend
-# selection is no longer needed, so provide no-op shims before importing.
-if not hasattr(torchaudio, "set_audio_backend"):
-    def _set_audio_backend(_backend):
-        return None
-
-    torchaudio.set_audio_backend = _set_audio_backend
-
-if not hasattr(torchaudio, "get_audio_backend"):
-    def _get_audio_backend():
-        return None
-
-    torchaudio.get_audio_backend = _get_audio_backend
-
 from torch_audiomentations import Compose, PitchShift, Shift, OneOf, AddColoredNoise
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
@@ -378,8 +362,6 @@ class BirdClefModelBase(pl.LightningModule):
         self.lr = cfg.lr[stage]
         self.epochs = cfg.epochs[stage]
         self.in_chans = cfg.in_chans
-        self._train_epoch_outputs = []
-        self._val_epoch_outputs = []
 
         if self.loss == "ce":
             self.loss_function = nn.CrossEntropyLoss(
@@ -407,11 +389,9 @@ class BirdClefModelBase(pl.LightningModule):
                     max_transpose_semitones=4,
                     sample_rate=self.cfg.SR,
                     p=0.4,
-                    output_type="tensor",
                 ),
-                Shift(min_shift=-0.5, max_shift=0.5, p=0.4, output_type="tensor"),
-            ],
-            output_type="tensor",
+                Shift(min_shift=-0.5, max_shift=0.5, p=0.4),
+            ]
         )
 
         self.time_mask_transform = torchaudio.transforms.TimeMasking(
@@ -532,7 +512,6 @@ class BirdClefModelBase(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         self.freeze()
         y_pred, target, loss = self(batch)
-        self._train_epoch_outputs.append({"loss": loss.detach()})
 
         # self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -543,13 +522,6 @@ class BirdClefModelBase(pl.LightningModule):
             y_pred, target, val_loss = self.ema.module(batch)
         else:
             y_pred, target, val_loss = self(batch)
-        self._val_epoch_outputs.append(
-            {
-                "val_loss": val_loss.detach(),
-                "logits": y_pred.detach(),
-                "targets": target.detach(),
-            }
-        )
         # print(y_pred)
         # self.log("val_loss", val_loss, on_step=True, on_epoch=True, logger=True, prog_bar=True)
 
@@ -561,14 +533,7 @@ class BirdClefModelBase(pl.LightningModule):
     def validation_dataloader(self):
         return self._validation_dataloader
 
-    def on_train_epoch_start(self):
-        self._train_epoch_outputs = []
-
-    def on_validation_epoch_start(self):
-        self._val_epoch_outputs = []
-
-    def on_validation_epoch_end(self):
-        outputs = self._val_epoch_outputs
+    def on_validation_epoch_end(self, outputs):
         if len(outputs):
             avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
             output_val = (
@@ -581,17 +546,6 @@ class BirdClefModelBase(pl.LightningModule):
             target_val = (
                 torch.cat([x["targets"] for x in outputs], dim=0).cpu().detach().numpy()
             )
-
-            invalid_pred_count = int((~np.isfinite(output_val)).sum())
-            invalid_target_count = int((~np.isfinite(target_val)).sum())
-            if invalid_pred_count or invalid_target_count:
-                print(
-                    f"warning: sanitizing validation tensors "
-                    f"(pred invalid={invalid_pred_count}, target invalid={invalid_target_count})"
-                )
-            output_val = np.nan_to_num(output_val, nan=0.0, posinf=1.0, neginf=0.0)
-            target_val = np.nan_to_num(target_val, nan=0.0, posinf=1.0, neginf=0.0)
-            avg_loss = torch.nan_to_num(avg_loss, nan=0.0, posinf=0.0, neginf=0.0)
 
             # print(output_val.shape)
             val_df = pd.DataFrame(target_val, columns=self.birds)
@@ -661,19 +615,17 @@ class BirdClefModelBase(pl.LightningModule):
             avg_score = 0
         return {"val_loss": avg_loss, "val_cmap": avg_score}
 
-    def on_train_epoch_end(self):
-        outputs = self._train_epoch_outputs
-        if len(outputs):
-            avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
-            self.log("train_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
+    def on_train_epoch_end(self, outputs):
+        avg_loss = torch.stack([x["loss"] for x in outputs]).mean()
+        self.log("train_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
         if (self.ema is not None) & ((self.current_epoch > self.epochs - 3 - 1)):
-            if not os.path.exists(self.cfg.output_path[self.stage]):
-                os.makedirs(self.cfg.output_path[self.stage])
+            if not os.path.exists(self.cfg.output_path[stage]):
+                os.makedirs(self.cfg.output_path[stage])
             torch.save(
                 {
                     "state_dict": self.ema.module.state_dict(),
                 },
-                os.path.join(self.cfg.output_path[self.stage], f"ema_{self.current_epoch}.ckpt"),
+                os.path.join(self.cfg.output_path[stage], f"ema_{self.current_epoch}.ckpt"),
             )
 
 
@@ -972,35 +924,11 @@ class BirdClefInferModelCNN(BirdClefTrainModelCNN):
         logits = self.head(x)
         return logits
 
-def _prefer_best_checkpoint(model_ckpt):
-    if model_ckpt is None:
-        return None
-
-    if os.path.exists(model_ckpt):
-        if os.path.basename(model_ckpt) == "last.ckpt":
-            best_ckpt = os.path.join(os.path.dirname(model_ckpt), "best.ckpt")
-            if os.path.exists(best_ckpt):
-                return best_ckpt
-        return model_ckpt
-
-    if os.path.basename(model_ckpt) == "last.ckpt":
-        best_ckpt = os.path.join(os.path.dirname(model_ckpt), "best.ckpt")
-        if os.path.exists(best_ckpt):
-            return best_ckpt
-
-    return model_ckpt if os.path.exists(model_ckpt) else None
-
 def load_model(cfg,stage,train=True):
     if train:
         model_ckpt = cfg.model_ckpt[stage]
-        if (
-            stage == "train_ce"
-            and getattr(cfg, "ignore_pretrain_checkpoints", False)
-        ):
-            model_ckpt = None
     else:
         model_ckpt = cfg.final_model_path
-    model_ckpt = _prefer_best_checkpoint(model_ckpt)
 
     if model_ckpt is not None:
         state_dict = torch.load(model_ckpt,map_location=cfg.DEVICE)['state_dict']
@@ -1020,7 +948,7 @@ def load_model(cfg,stage,train=True):
             model = BirdClefTrainModelSED(cfg, stage)
             if state_dict is not None:
                 # pretrain to train
-                if stage == 'train_ce' and getattr(cfg, "reset_head_on_train_ce", True):
+                if stage == 'train_ce':
                     state_dict.pop('att_block.att.weight')
                     state_dict.pop('att_block.att.bias')
                     state_dict.pop('att_block.cla.weight')
@@ -1037,7 +965,7 @@ def load_model(cfg,stage,train=True):
             model = BirdClefTrainModelCNN(cfg, stage)
             if state_dict is not None:
                 # pretrain to train
-                if stage == 'train_ce' and getattr(cfg, "reset_head_on_train_ce", True):
+                if stage == 'train_ce':
                     state_dict.pop('head.weight')
                     state_dict.pop('head.bias')
                     model.load_state_dict(state_dict,strict=False)
@@ -1052,3 +980,5 @@ def load_model(cfg,stage,train=True):
     if not train:
         model.eval()
     return model
+
+

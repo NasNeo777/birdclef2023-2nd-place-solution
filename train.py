@@ -10,8 +10,6 @@ import torch
 import os
 import gc
 import json
-from datetime import datetime
-from modules.pseudo import load_pseudo_labels
 
 def make_parser():
     parser = argparse.ArgumentParser(description='parser')
@@ -30,11 +28,6 @@ def main():
     cfg = importlib.import_module(f'configs.{model_name}').basic_cfg
     cfg = prepare_cfg(cfg,stage)
     os.environ['WANDB_API_KEY'] = cfg.WANDB_API_KEY
-    os.environ.setdefault(
-        "PYTORCH_CUDA_ALLOC_CONF",
-        getattr(cfg, "cuda_alloc_conf", "expandable_segments:True"),
-    )
-    torch.set_float32_matmul_precision(getattr(cfg, "val_matmul_precision", "high"))
 
     pl.seed_everything(cfg.seed[stage], workers=True)
 
@@ -44,20 +37,20 @@ def main():
 
     if use_pseudo:
         # =========================================================
-        pseudo_file = os.path.join(cfg.pseudo_label_path, 'pseudo.json')
-        hand_label_file = os.path.join(cfg.hand_label_path, 'hand_label.json')
+        with open('/content/birdclef2023-2nd-place-solution/inputs/pseudo_label/pseudo.json') as f:
+            pseudo = json.loads(f.read())
 
-        if not os.path.exists(pseudo_file):
-            print(f"Warning: Pseudo label files not found at {cfg.pseudo_label_path}")
-            use_pseudo = False
-            pseudo = None
-        else:
-            pseudo = load_pseudo_labels(
-                pseudo_file,
-                hand_label_file if os.path.exists(hand_label_file) else None,
-            )
+        with open('/content/birdclef2023-2nd-place-solution/inputs/hand_label/hand_label.json') as f:
+            hand_label = json.loads(f.read())
+
+        for version in hand_label['pred'].keys():
+            for filename in hand_label['pred'][version].keys():
+                for label in hand_label['pred'][version][filename].keys():
+                    for second in hand_label['pred'][version][filename][label].keys():
+                        for i in range(len(pseudo['subset1']['pseudo'])):
+                            if second in pseudo['subset1']['pseudo'][i]['pred'][version][filename][label].keys():
+                                pseudo['subset1']['pseudo'][i]['pred'][version][filename][label][second] = hand_label['pred'][version][filename][label][second]
         # =========================================================
-
 
     dl_train, dl_val, ds_train, ds_val = get_train_dataloader(
         df_train,
@@ -71,21 +64,18 @@ def main():
     )
 
     logger = WandbLogger(project='BirdClef-2023', name=f'{model_name}_{stage}')
-    os.makedirs(cfg.output_path[stage], exist_ok=True)
-    done_path = os.path.join(cfg.output_path[stage], "done.json")
-    if os.path.exists(done_path):
-        os.remove(done_path)
     checkpoint_callback = ModelCheckpoint(
-        monitor="validation C-MAP score pad 5",
+        #monitor='val_loss',
+        monitor=None,
         dirpath= cfg.output_path[stage],
-        filename="best",
-        auto_insert_metric_name=False,
-        save_top_k=1,
+        save_top_k=0,
         save_last= True,
         save_weights_only=True,
+        #filename= './ckpt_epoch_{epoch}_val_loss_{val_loss:.2f}',
+        #filename ='./ckpt_{epoch}_{val_loss}',
         verbose= True,
         every_n_epochs=1,
-        mode='max'
+        mode='min'
     )
     callbacks_to_use = [checkpoint_callback]
     model = load_model(cfg,stage)
@@ -94,10 +84,6 @@ def main():
         val_check_interval=1.0,
         deterministic=None,
         max_epochs=cfg.epochs[stage],
-        num_sanity_val_steps=getattr(cfg, "num_sanity_val_steps", 0),
-        accumulate_grad_batches=getattr(cfg, "accumulate_grad_batches", 1),
-        gradient_clip_val=getattr(cfg, "gradient_clip_val", 0.0),
-        gradient_clip_algorithm=getattr(cfg, "gradient_clip_algorithm", "norm"),
         logger=logger,
         callbacks=callbacks_to_use,
         precision=cfg.PRECISION, accelerator="auto",
@@ -105,22 +91,6 @@ def main():
 
     print("Running trainer.fit")
     trainer.fit(model, train_dataloaders = dl_train, val_dataloaders = dl_val)
-
-    done_payload = {
-        "model_name": model_name,
-        "stage": stage,
-        "completed_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "epochs": cfg.epochs[stage],
-        "best_model_path": checkpoint_callback.best_model_path or "",
-        "best_model_score": (
-            float(checkpoint_callback.best_model_score.item())
-            if checkpoint_callback.best_model_score is not None
-            else None
-        ),
-        "last_model_path": checkpoint_callback.last_model_path or "",
-    }
-    with open(done_path, "w") as f:
-        json.dump(done_payload, f, indent=2)
 
     gc.collect()
     torch.cuda.empty_cache()
