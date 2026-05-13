@@ -2,11 +2,20 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
 DRY_RUN=0
 CONTINUE_ON_ERROR=0
 SKIP_EXISTING=1
 INCLUDE_MODELS=""
+
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  :
+elif [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/python" ]]; then
+  PYTHON_BIN="${CONDA_PREFIX}/bin/python"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  PYTHON_BIN="$(command -v python3)"
+fi
 
 usage() {
   cat <<'EOF'
@@ -66,7 +75,6 @@ cd "$ROOT_DIR"
 mapfile -t JOBS < <(
   "$PYTHON_BIN" - <<'PY'
 import importlib
-import os
 
 preferred_models = [
     "sed_v2s",
@@ -98,7 +106,7 @@ for model_name in preferred_models:
     for stage in preferred_stages:
         if stage in available_stages:
             output_dir = cfg.output_path[stage]
-            print(f"{model_name}\t{stage}\t{output_dir}")
+            print(f"{model_name}\t{stage}\t{output_dir}\t{len(cfg.bird_cols_train)}\t{cfg.model_type}")
 PY
 )
 
@@ -122,11 +130,41 @@ contains_model() {
   return 1
 }
 
+checkpoint_matches_classes() {
+  local checkpoint_path="$1"
+  local num_classes="$2"
+  local model_type="$3"
+
+  "$PYTHON_BIN" - "$checkpoint_path" "$num_classes" "$model_type" <<'PY'
+import sys
+import torch
+
+checkpoint_path, num_classes, model_type = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+state_dict = torch.load(checkpoint_path, map_location="cpu").get("state_dict", {})
+
+if model_type == "sed":
+    key = "att_block.cla.bias"
+elif model_type == "cnn":
+    key = "head.bias"
+else:
+    print("0")
+    raise SystemExit(0)
+
+value = state_dict.get(key)
+if value is None:
+    print("0")
+elif int(value.shape[0]) == num_classes:
+    print("1")
+else:
+    print("0")
+PY
+}
+
 total_jobs=0
 run_jobs=0
 
 for job in "${JOBS[@]}"; do
-  IFS=$'\t' read -r model_name stage output_dir <<< "$job"
+  IFS=$'\t' read -r model_name stage output_dir num_classes model_type <<< "$job"
   if ! contains_model "$model_name"; then
     continue
   fi
@@ -141,15 +179,18 @@ fi
 echo "Discovered $total_jobs training jobs."
 
 for job in "${JOBS[@]}"; do
-  IFS=$'\t' read -r model_name stage output_dir <<< "$job"
+  IFS=$'\t' read -r model_name stage output_dir num_classes model_type <<< "$job"
   if ! contains_model "$model_name"; then
     continue
   fi
 
   checkpoint_path="$output_dir/last.ckpt"
   if [[ "$SKIP_EXISTING" -eq 1 && -f "$checkpoint_path" ]]; then
-    echo "[skip] $model_name $stage ($checkpoint_path exists)"
-    continue
+    if [[ "$(checkpoint_matches_classes "$checkpoint_path" "$num_classes" "$model_type")" == "1" ]]; then
+      echo "[skip] $model_name $stage ($checkpoint_path exists and matches ${num_classes} classes)"
+      continue
+    fi
+    echo "[rerun] $model_name $stage ($checkpoint_path exists but is incompatible with ${num_classes} classes)"
   fi
 
   run_jobs=$((run_jobs + 1))

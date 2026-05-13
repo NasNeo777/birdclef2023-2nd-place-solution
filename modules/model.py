@@ -949,6 +949,26 @@ class BirdClefInferModelCNN(BirdClefTrainModelCNN):
         logits = self.head(x)
         return logits
 
+
+def filter_incompatible_state_dict(model, state_dict):
+    model_state = model.state_dict()
+    filtered_state_dict = {}
+    dropped_keys = []
+    for key, value in state_dict.items():
+        if key not in model_state:
+            dropped_keys.append(key)
+            continue
+        if model_state[key].shape != value.shape:
+            dropped_keys.append(key)
+            continue
+        filtered_state_dict[key] = value
+    if dropped_keys:
+        print(
+            "dropping incompatible checkpoint keys:",
+            ", ".join(sorted(dropped_keys)),
+        )
+    return filtered_state_dict
+
 def load_model(cfg,stage,train=True):
     if train:
         model_ckpt = cfg.model_ckpt[stage]
@@ -978,11 +998,11 @@ def load_model(cfg,stage,train=True):
                     state_dict.pop('att_block.att.bias')
                     state_dict.pop('att_block.cla.weight')
                     state_dict.pop('att_block.cla.bias')
-                    model.load_state_dict(state_dict,strict=False)
-                else:
-                    model.load_state_dict(state_dict,strict=False)
+                state_dict = filter_incompatible_state_dict(model, state_dict)
+                model.load_state_dict(state_dict,strict=False)
         else:
             model = BirdClefInferModelSED(cfg, stage)
+            state_dict = filter_incompatible_state_dict(model, state_dict)
             model.load_state_dict(state_dict,strict=False)
 
     elif cfg.model_type=='cnn':
@@ -993,11 +1013,11 @@ def load_model(cfg,stage,train=True):
                 if stage == 'train_ce':
                     state_dict.pop('head.weight')
                     state_dict.pop('head.bias')
-                    model.load_state_dict(state_dict,strict=False)
-                else:
-                    model.load_state_dict(state_dict,strict=False)
+                state_dict = filter_incompatible_state_dict(model, state_dict)
+                model.load_state_dict(state_dict,strict=False)
         else:
             model = BirdClefInferModelCNN(cfg, stage)
+            state_dict = filter_incompatible_state_dict(model, state_dict)
             model.load_state_dict(state_dict,strict=False)
     else:
         raise NotImplementedError
