@@ -3,6 +3,8 @@ import numpy as np
 from ast import literal_eval
 import torch
 import os
+import soundfile as sf
+import librosa as lb
 
 def _resolve_stage_value(value, stage, name):
     if isinstance(value, dict):
@@ -115,6 +117,58 @@ def _infer_bird_cols_from_df(df, cfg):
 
     return bird_cols
 
+def _probe_audio_duration(path):
+    try:
+        return float(sf.info(path).duration)
+    except Exception:
+        try:
+            return float(lb.get_duration(path=path))
+        except Exception:
+            return np.nan
+
+def _fill_missing_duration(df, cfg):
+    if "duration" not in df.columns:
+        print("warning: 'duration' column not found, inferring durations from audio files")
+        df["duration"] = np.nan
+
+    duration_series = pd.to_numeric(df["duration"], errors="coerce")
+    missing_mask = ~np.isfinite(duration_series.values) | (duration_series.values <= 0)
+    if not missing_mask.any():
+        df["duration"] = duration_series.astype(np.float32)
+        return df
+
+    cache_path = getattr(cfg, "duration_cache_path", None)
+    cached_duration = {}
+    if cache_path and os.path.exists(cache_path):
+        cache_df = pd.read_csv(cache_path)
+        cached_duration = dict(zip(cache_df["path"].astype(str), cache_df["duration"].astype(float)))
+
+    missing_paths = df.loc[missing_mask, "path"].astype(str).unique().tolist()
+    unresolved_paths = [path for path in missing_paths if path not in cached_duration]
+    if unresolved_paths:
+        print(f"inferring durations for {len(unresolved_paths)} audio files")
+        for path in unresolved_paths:
+            cached_duration[path] = _probe_audio_duration(path)
+
+        if cache_path:
+            cache_dir = os.path.dirname(cache_path)
+            if cache_dir:
+                os.makedirs(cache_dir, exist_ok=True)
+            cache_rows = [
+                {"path": path, "duration": duration}
+                for path, duration in cached_duration.items()
+                if np.isfinite(duration) and duration > 0
+            ]
+            pd.DataFrame(cache_rows).to_csv(cache_path, index=False)
+
+    df["duration"] = df["path"].map(cached_duration).fillna(duration_series)
+    unresolved_count = int((~np.isfinite(pd.to_numeric(df["duration"], errors="coerce"))).sum())
+    if unresolved_count:
+        print(f"warning: failed to infer duration for {unresolved_count} files, falling back to 30.0s")
+        df["duration"] = pd.to_numeric(df["duration"], errors="coerce").fillna(30.0)
+    df["duration"] = df["duration"].astype(np.float32)
+    return df
+
 def preprocess(cfg):
     def transforms(audio):
         audio = cfg.np_audio_transforms(audio)
@@ -144,11 +198,6 @@ def preprocess(cfg):
     
     # In user dataset, filename already contains the path inside train_audio/
     df['path'] = df['filename'].apply(lambda x: os.path.join(cfg.train_dir, x))
-    
-    # Handle missing duration
-    if 'duration' not in df.columns:
-        print("warning: 'duration' column not found, setting default to 30.0s")
-        df['duration'] = 30.0
 
     # ensure all the train data is available
     if not df['path'].apply(lambda x:os.path.exists(x)).all():
@@ -157,6 +206,7 @@ def preprocess(cfg):
         print('warning: only audios available will be used for training')
         print('===========================================================')
     df = df[df['path'].apply(lambda x:os.path.exists(x))].reset_index(drop=True)
+    df = _fill_missing_duration(df, cfg)
 
     labels = np.zeros(shape=(len(df),len(cfg.bird_cols)))
     df_labels = pd.DataFrame(labels,columns=cfg.bird_cols)

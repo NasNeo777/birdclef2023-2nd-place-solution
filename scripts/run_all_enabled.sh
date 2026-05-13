@@ -43,8 +43,26 @@ run_stage() {
   local done_file="${ckpt_dir}/done.json"
 
   if [[ "$SKIP_DONE" == "1" && -f "$done_file" ]]; then
-    echo "[skip] ${model} ${stage} -> ${done_file}"
-    return 0
+    local skip_reason
+    skip_reason="$("$PYTHON_BIN" -c "import importlib, os, sys; cfg = importlib.import_module('configs.${model}').basic_cfg; cache_path = getattr(cfg, 'duration_cache_path', None); dynamic = bool(getattr(cfg, 'dynamic_bird_cols', False)); done_path = '${done_file}'; upstream = None; model_ckpt = getattr(cfg, 'model_ckpt', {}).get('${stage}'); should_skip = True; reason = done_path; 
+if dynamic and cache_path and os.path.exists(cache_path) and os.path.getmtime(cache_path) > os.path.getmtime(done_path):
+    should_skip = False
+    reason = f'duration cache newer than done file: {cache_path}'
+elif model_ckpt:
+    upstream = model_ckpt
+    if os.path.basename(upstream) == 'last.ckpt':
+        best_ckpt = os.path.join(os.path.dirname(upstream), 'best.ckpt')
+        if os.path.exists(best_ckpt):
+            upstream = best_ckpt
+    if os.path.exists(upstream) and os.path.getmtime(upstream) > os.path.getmtime(done_path):
+        should_skip = False
+        reason = f'upstream checkpoint newer than done file: {upstream}'
+sys.stdout.write(reason if should_skip else '')")"
+    if [[ -n "$skip_reason" ]]; then
+      echo "[skip] ${model} ${stage} -> ${skip_reason}"
+      return 0
+    fi
+    echo "[rerun] ${model} ${stage} because prerequisites are newer than ${done_file}"
   fi
 
   echo
@@ -60,7 +78,7 @@ run_stage() {
 
 enabled_stages() {
   local model="$1"
-  "$PYTHON_BIN" -c "import importlib; cfg = importlib.import_module('configs.${model}').basic_cfg; stage_order = ['pretrain_ce', 'pretrain_bce', 'train_ce', 'train_bce', 'finetune']; print(' '.join([stage for stage in stage_order if stage in cfg.seed]))"
+  "$PYTHON_BIN" -c "import importlib; cfg = importlib.import_module('configs.${model}').basic_cfg; default_order = ['pretrain_ce', 'pretrain_bce', 'train_ce', 'train_bce', 'finetune']; stage_order = getattr(cfg, 'enabled_stages', None) or default_order; print(' '.join([stage for stage in stage_order if stage in cfg.seed]))"
 }
 
 for model in "${MODELS[@]}"; do

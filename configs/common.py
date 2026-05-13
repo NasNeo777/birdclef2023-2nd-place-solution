@@ -28,6 +28,10 @@ cfg.pseudo_label_path = 'inputs/pseudo_label'
 cfg.hand_label_path = 'inputs/hand_label'
 cfg.pseudo_version_aliases = {}
 cfg.dynamic_bird_cols = True
+cfg.enabled_stages = ["train_ce", "train_bce"] if cfg.dynamic_bird_cols else None
+cfg.ignore_pretrain_checkpoints = cfg.dynamic_bird_cols
+cfg.reset_head_on_train_ce = not cfg.dynamic_bird_cols
+cfg.duration_cache_path = "outputs/duration_cache.csv"
 
 cfg.train_data = '/media/nasneo/AI/datas/bird/train.csv'
 cfg.train_dir = '/media/nasneo/AI/datas/bird/train_audio'

@@ -988,11 +988,16 @@ def _prefer_best_checkpoint(model_ckpt):
         if os.path.exists(best_ckpt):
             return best_ckpt
 
-    return model_ckpt
+    return model_ckpt if os.path.exists(model_ckpt) else None
 
 def load_model(cfg,stage,train=True):
     if train:
         model_ckpt = cfg.model_ckpt[stage]
+        if (
+            stage == "train_ce"
+            and getattr(cfg, "ignore_pretrain_checkpoints", False)
+        ):
+            model_ckpt = None
     else:
         model_ckpt = cfg.final_model_path
     model_ckpt = _prefer_best_checkpoint(model_ckpt)
@@ -1015,7 +1020,7 @@ def load_model(cfg,stage,train=True):
             model = BirdClefTrainModelSED(cfg, stage)
             if state_dict is not None:
                 # pretrain to train
-                if stage == 'train_ce':
+                if stage == 'train_ce' and getattr(cfg, "reset_head_on_train_ce", True):
                     state_dict.pop('att_block.att.weight')
                     state_dict.pop('att_block.att.bias')
                     state_dict.pop('att_block.cla.weight')
@@ -1032,7 +1037,7 @@ def load_model(cfg,stage,train=True):
             model = BirdClefTrainModelCNN(cfg, stage)
             if state_dict is not None:
                 # pretrain to train
-                if stage == 'train_ce':
+                if stage == 'train_ce' and getattr(cfg, "reset_head_on_train_ce", True):
                     state_dict.pop('head.weight')
                     state_dict.pop('head.bias')
                     model.load_state_dict(state_dict,strict=False)
