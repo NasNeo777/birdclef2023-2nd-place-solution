@@ -47,6 +47,19 @@ def padded_cmap(solution, submission, padding_factor=5):
     return score
 
 
+def birdclef2026_metric(solution, submission):
+    """Macro-averaged ROC-AUC skipping classes with no true positive labels."""
+    solution_sums = solution.sum(axis=0)
+    scored_columns = list(solution_sums[solution_sums > 0].index.values)
+    if len(scored_columns) == 0:
+        return 0.0
+    return sklearn.metrics.roc_auc_score(
+        solution[scored_columns].values,
+        submission[scored_columns].values,
+        average="macro",
+    )
+
+
 def map_score(solution, submission):
     solution = solution  # .drop(['row_id'], axis=1, errors='ignore')
     submission = submission  # .drop(['row_id'], axis=1, errors='ignore')
@@ -571,11 +584,8 @@ class BirdClefModelBase(pl.LightningModule):
             val_df = pd.DataFrame(target_val, columns=self.birds)
             pred_df = pd.DataFrame(output_val, columns=self.birds)
             if self.current_epoch > -1:
-                avg_score = padded_cmap(val_df, pred_df, padding_factor=5)
-                avg_score2 = padded_cmap(val_df, pred_df, padding_factor=3)
-                avg_score3 = sklearn.metrics.label_ranking_average_precision_score(
-                    target_val, output_val
-                )
+                avg_score = birdclef2026_metric(val_df, pred_df)
+                avg_score2 = birdclef2026_metric(val_df, (pred_df > 0.5).astype(float))
                 self.log(
                     "val_loss",
                     avg_loss,
@@ -585,7 +595,7 @@ class BirdClefModelBase(pl.LightningModule):
                     prog_bar=True,
                 )
                 self.log(
-                    "validation C-MAP score pad 5",
+                    "val_roc_auc",
                     avg_score,
                     on_step=False,
                     on_epoch=True,
@@ -593,30 +603,20 @@ class BirdClefModelBase(pl.LightningModule):
                     prog_bar=True,
                 )
                 self.log(
-                    "validation C-MAP score pad e",
+                    "val_roc_auc_bin",
                     avg_score2,
                     on_step=False,
                     on_epoch=True,
                     logger=True,
-                    prog_bar=True,
+                    prog_bar=False,
                 )
-                self.log(
-                    "validation AP score",
-                    avg_score3,
-                    on_step=False,
-                    on_epoch=True,
-                    logger=True,
-                    prog_bar=True,
-                )
-                #         competition_metrics(output_val,target_val)
                 print(f"epoch {self.current_epoch} validation loss {avg_loss}")
                 print(
-                    f"epoch {self.current_epoch} validation C-MAP score pad 5 {avg_score}"
+                    f"epoch {self.current_epoch} validation ROC-AUC {avg_score}"
                 )
                 print(
-                    f"epoch {self.current_epoch} validation C-MAP score pad 3 {avg_score2}"
+                    f"epoch {self.current_epoch} validation ROC-AUC (binary) {avg_score2}"
                 )
-                print(f"epoch {self.current_epoch} validation AP score {avg_score3}")
             else:
                 self.log(
                     "val_loss",
@@ -634,7 +634,7 @@ class BirdClefModelBase(pl.LightningModule):
             avg_loss = 0
             avg_score = 0
         self.validation_step_outputs.clear()
-        return {"val_loss": avg_loss, "val_cmap": avg_score}
+        return {"val_loss": avg_loss, "val_roc_auc": avg_score}
 
     def on_train_epoch_end(self):
         outputs = self.training_step_outputs
