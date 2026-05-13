@@ -73,8 +73,9 @@ class BirdTrainDataset(Dataset):
         version = row['version']
         presence = row['presence_type']
 
-        if getattr(self.cfg, "fixed_clip_mode", False) and "clip_start_sec" in row.index:
-            offset = float(row["clip_start_sec"])
+        clip_start_sec = row.get("clip_start_sec", np.nan)
+        if getattr(self.cfg, "fixed_clip_mode", False) and not np.isnan(clip_start_sec):
+            offset = float(clip_start_sec)
             clip_duration = float(row.get("clip_duration", self.duration))
             audio_sample, orig_sr = lb.load(
                 filepath, sr=None, mono=True, offset=offset, duration=clip_duration
@@ -100,6 +101,34 @@ class BirdTrainDataset(Dataset):
             target = target.values
             if not self.train:
                 target[target>0] = 1
+            return audio_sample, target
+        elif getattr(self.cfg, "fixed_clip_mode", False):
+            max_offset = max(0.0, float(duration) - self.duration)
+            offset = torch.rand((1,)).numpy()[0] * max_offset if self.train else 0.0
+            audio_sample, orig_sr = lb.load(
+                filepath, sr=None, mono=True, offset=offset, duration=self.duration
+            )
+            if self.resample and orig_sr != self.sr:
+                audio_sample = lb.resample(
+                    audio_sample, orig_sr, self.sr, res_type=self.res_type
+                )
+
+            if self.transforms is not None and self.train:
+                audio_sample = self.transforms(audio_sample)
+
+            audio_sample = crop_or_pad(
+                audio_sample, length=self.audio_length, is_train=self.train
+            )
+
+            if self.train:
+                audio_sample = audio_sample[np.newaxis]
+            else:
+                audio_sample = audio_sample[np.newaxis, np.newaxis]
+
+            audio_sample = torch.tensor(audio_sample).float()
+            target = target.values
+            if not self.train:
+                target[target > 0] = 1
             return audio_sample, target
 
         # self mixup
