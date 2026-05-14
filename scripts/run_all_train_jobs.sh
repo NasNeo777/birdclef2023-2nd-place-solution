@@ -187,9 +187,13 @@ for job in "${JOBS[@]}"; do
 
   # Find the newest .ckpt file (last.ckpt or last-v*.ckpt)
   checkpoint_path=""
-  newest_ckpt=$(ls -t "$output_dir"/*.ckpt 2>/dev/null | head -1)
-  if [[ -n "$newest_ckpt" && -f "$newest_ckpt" ]]; then
-    checkpoint_path="$newest_ckpt"
+  # Use nullglob to safely expand glob without triggering errexit on no match
+  ckpt_files=$(shopt -s nullglob; echo "$output_dir"/*.ckpt)
+  if [[ -n "$ckpt_files" ]]; then
+    newest_ckpt=$(ls -t $ckpt_files 2>/dev/null | head -1 || true)
+    if [[ -n "$newest_ckpt" && -f "$newest_ckpt" ]]; then
+      checkpoint_path="$newest_ckpt"
+    fi
   elif [[ -f "$output_dir/last.ckpt" ]]; then
     checkpoint_path="$output_dir/last.ckpt"
   fi

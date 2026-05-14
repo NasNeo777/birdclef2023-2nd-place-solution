@@ -70,7 +70,7 @@ cfg.model_ckpt = {
 }
 
 cfg.output_path = {
-    "pretrain_ce": "outputs/sed_b3nspytorch/pretrain_ce",
+    "pretrain_ce": "outputs/sed_b3ns/pytorch/pretrain_ce",
     "pretrain_bce": "outputs/sed_b3ns/pytorch/pretrain_bce",
     "train_ce": "outputs/sed_b3ns/pytorch/train_ce",
     "train_bce": "outputs/sed_b3ns/pytorch/train_bce",
