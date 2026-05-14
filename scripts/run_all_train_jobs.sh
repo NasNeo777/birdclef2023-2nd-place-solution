@@ -106,7 +106,8 @@ for model_name in preferred_models:
     for stage in preferred_stages:
         if stage in available_stages:
             output_dir = cfg.output_path[stage]
-            print(f"{model_name}\t{stage}\t{output_dir}\t{len(cfg.bird_cols_train)}\t{cfg.model_type}")
+            n_classes = len(cfg.bird_cols_pretrain) if "pretrain" in stage else len(cfg.bird_cols_train)
+            print(f"{model_name}\t{stage}\t{output_dir}\t{n_classes}\t{cfg.model_type}")
 PY
 )
 
@@ -184,10 +185,18 @@ for job in "${JOBS[@]}"; do
     continue
   fi
 
-  checkpoint_path="$output_dir/last.ckpt"
-  if [[ "$SKIP_EXISTING" -eq 1 && -f "$checkpoint_path" ]]; then
+  # Find the newest .ckpt file (last.ckpt or last-v*.ckpt)
+  checkpoint_path=""
+  newest_ckpt=$(ls -t "$output_dir"/*.ckpt 2>/dev/null | head -1)
+  if [[ -n "$newest_ckpt" && -f "$newest_ckpt" ]]; then
+    checkpoint_path="$newest_ckpt"
+  elif [[ -f "$output_dir/last.ckpt" ]]; then
+    checkpoint_path="$output_dir/last.ckpt"
+  fi
+
+  if [[ "$SKIP_EXISTING" -eq 1 && -n "$checkpoint_path" ]]; then
     if [[ "$(checkpoint_matches_classes "$checkpoint_path" "$num_classes" "$model_type")" == "1" ]]; then
-      echo "[skip] $model_name $stage ($checkpoint_path exists and matches ${num_classes} classes)"
+      echo "[skip] $model_name $stage ($checkpoint_path matches ${num_classes} classes)"
       continue
     fi
     echo "[rerun] $model_name $stage ($checkpoint_path exists but is incompatible with ${num_classes} classes)"
