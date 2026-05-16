@@ -12,6 +12,8 @@ from typing import Any
 import librosa
 import numpy as np
 import openvino as ov
+if not hasattr(ov, "Core"):
+    import openvino.runtime as ov
 import pandas as pd
 import soundfile as sf
 import torch
@@ -21,7 +23,7 @@ from tqdm.auto import tqdm
 
 
 DATA_DIR = Path(os.environ.get("BIRDCLEF_DATA_DIR", "/kaggle/input/competitions/birdclef-2026"))
-WEIGHTS_ROOT = Path(os.environ.get("WEIGHTS_ROOT", "/kaggle/input/birdclef2026-weights"))
+WEIGHTS_ROOT = Path(os.environ.get("WEIGHTS_ROOT", "/kaggle/input/birdclef2026-2nd-place-openvino"))
 OUT_PATH = Path(os.environ.get("OUT_PATH", "/kaggle/working/submission.csv"))
 OPENVINO_DEVICE = os.environ.get("OPENVINO_DEVICE", "CPU")
 DRY_RUN_FILES = int(os.environ.get("DRY_RUN_FILES", "2"))
@@ -377,19 +379,24 @@ class Runner:
         outputs: list[np.ndarray] = []
         for start in range(0, len(batch), self.max_batch):
             chunk = batch[start : start + self.max_batch].astype(np.float32, copy=False)
+            chunk_len = len(chunk)
+            if chunk_len < self.max_batch:
+                pad_shape = (self.max_batch - chunk_len, *chunk.shape[1:])
+                chunk = np.concatenate([chunk, np.zeros(pad_shape, dtype=np.float32)], axis=0)
             if self.spec.kind == "sed":
-                if len(self.input_names) < 2:
-                    raise RuntimeError(f"{self.spec.name} expected 2 inputs, found {len(self.input_names)}")
-                result = self.infer_request.infer(
-                    {
-                        self.input_names[0]: chunk,
-                        self.input_names[1]: np.array(self.spec.tta_delta, dtype=np.int64),
-                    }
-                )
+                if len(self.input_names) >= 2:
+                    result = self.infer_request.infer(
+                        {
+                            self.input_names[0]: chunk,
+                            self.input_names[1]: np.array(self.spec.tta_delta, dtype=np.int64),
+                        }
+                    )
+                else:
+                    result = self.infer_request.infer({self.input_names[0]: chunk})
             else:
                 result = self.infer_request.infer({self.input_names[0]: chunk})
             output = next(iter(result.values()))
-            outputs.append(np.asarray(output, dtype=np.float32))
+            outputs.append(np.asarray(output, dtype=np.float32)[:chunk_len])
         pred = np.concatenate(outputs, axis=0)
         if self.spec.output_type == "prob":
             pred = logit_np(pred)
@@ -401,11 +408,13 @@ def build_runner(model_spec: ModelSpec, class_names: list[str], core: ov.Core) -
     compiled = core.compile_model(str(xml_path), OPENVINO_DEVICE)
     infer_request = compiled.create_infer_request()
     input_names = [port.get_any_name() for port in compiled.inputs]
-    first_shape = compiled.input(0).partial_shape
     try:
-        max_batch = int(first_shape[0])
+        max_batch = int(compiled.input(0).shape[0])
     except Exception:
-        max_batch = MODEL_BATCH_FALLBACK
+        try:
+            max_batch = int(compiled.input(0).partial_shape[0])
+        except Exception:
+            max_batch = MODEL_BATCH_FALLBACK
     if max_batch <= 0:
         max_batch = MODEL_BATCH_FALLBACK
     return Runner(
