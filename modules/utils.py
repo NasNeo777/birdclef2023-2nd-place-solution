@@ -29,24 +29,28 @@ class SoftAUCLoss(nn.Module):
         self.pos_weight = pos_weight
         self.neg_weight = neg_weight
 
-def forward(self, preds, labels, sample_weights=None):
-        pos_preds = preds[labels>0.5]
-        neg_preds = preds[labels<0.5]
-        pos_labels = labels[labels>0.5]
-        neg_labels = labels[labels<0.5]
+    def forward(self, preds, labels, sample_weights=None):
+        labels = labels.to(dtype=preds.dtype)
+        pos_mask = labels > 0.5
+        neg_mask = labels < 0.5
+        pos_preds = preds[pos_mask]
+        neg_preds = preds[neg_mask]
+        pos_labels = labels[pos_mask]
+        neg_labels = labels[neg_mask]
 
         if len(pos_preds) == 0 or len(neg_preds) == 0:
-            return torch.tensor(0.0, device=preds.device)
+            return preds.sum() * 0.0
 
-        pos_weights = torch.ones_like(pos_preds) * self.pos_weight * (pos_labels-0.5)
-        neg_weights = torch.ones_like(neg_preds) * self.neg_weight * (0.5-neg_labels)
+        pos_weights = torch.ones_like(pos_preds) * self.pos_weight * (pos_labels - 0.5)
+        neg_weights = torch.ones_like(neg_preds) * self.neg_weight * (0.5 - neg_labels)
         if sample_weights is not None:
-            sample_weights = torch.stack([sample_weights]*labels.shape[1], dim=1)
-            pos_weights = pos_weights * sample_weights
-            neg_weights = neg_weights * sample_weights
+            sample_weights = sample_weights.to(device=preds.device, dtype=preds.dtype)
+            sample_weights = sample_weights[:, None].expand_as(labels)
+            pos_weights = pos_weights * sample_weights[pos_mask]
+            neg_weights = neg_weights * sample_weights[neg_mask]
 
         diff = pos_preds.unsqueeze(1) - neg_preds.unsqueeze(0)  # [N_pos, N_neg]
-        loss_matrix = torch.log(1 + torch.exp(-diff * self.margin))  # [N_pos, N_neg]
+        loss_matrix = F.softplus(-diff * self.margin)  # [N_pos, N_neg]
 
         weighted_loss = loss_matrix * pos_weights.unsqueeze(1) * neg_weights.unsqueeze(0)
 

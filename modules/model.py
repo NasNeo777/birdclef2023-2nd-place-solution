@@ -27,6 +27,7 @@ from torch.optim.lr_scheduler import (
 )
 import sklearn.metrics
 from torch.cuda.amp import autocast
+from modules.utils import SoftAUCLoss
 
 
 def padded_cmap(solution, submission, padding_factor=5):
@@ -384,14 +385,7 @@ class BirdClefModelBase(pl.LightningModule):
         self.epochs = cfg.epochs[stage]
         self.in_chans = cfg.in_chans
 
-        if self.loss == "ce":
-            self.loss_function = nn.CrossEntropyLoss(
-                label_smoothing=self.cfg.label_smoothing, reduction="none"
-            )
-        elif self.loss == "bce":
-            self.loss_function = nn.BCEWithLogitsLoss(reduction="none")
-        else:
-            raise NotImplementedError
+        self.loss_function = SoftAUCLoss()
         self.mixup = Mixup(
             mix_beta=self.cfg.mix_beta,
             mixup_prob=self.cfg.mixup_prob,
@@ -770,19 +764,14 @@ class BirdClefTrainModelSED(BirdClefModelBase):
                 framewise_logit.reshape((bs, parts, fram_num, -1)).max(dim=1).values
             )
 
+        clipwise_logit = torch.logit(clipwise_output.clamp(1e-6, 1.0 - 1e-6))
         loss = 0.5 * self.loss_function(
-            torch.logit(clipwise_output), y
-        ) + 0.5 * self.loss_function(segmentwise_logit.max(1)[0], y)
-        # loss = 0.5*self.loss_function(torch.logit(clipwise_output), y) + 0.5*self.loss_function(framewise_logit.max(1)[0], y)
-        if self.loss == "ce":
-            loss = (loss * weight) / weight.sum()
-        elif self.loss == "bce":
-            loss = loss.sum(dim=1) * weight
-        else:
-            raise NotImplementedError
-        loss = loss.sum()
+            clipwise_logit, y, sample_weights=weight
+        ) + 0.5 * self.loss_function(
+            segmentwise_logit.max(1)[0], y, sample_weights=weight
+        )
 
-        return torch.logit(clipwise_output), y, loss
+        return clipwise_logit, y, loss
 
 class BirdClefInferModelSED(BirdClefTrainModelSED):
     def forward(self,x,tta_delta=2):
@@ -917,14 +906,7 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
         else:
             logits = self.head(x)
 
-        loss = self.loss_function(logits, y)
-        if self.loss == "ce":
-            loss = (loss * weight) / weight.sum()
-        elif self.loss == "bce":
-            loss = loss.sum(dim=1) * weight
-        else:
-            raise NotImplementedError
-        loss = loss.sum()
+        loss = self.loss_function(logits, y, sample_weights=weight)
 
         return logits, y, loss
 

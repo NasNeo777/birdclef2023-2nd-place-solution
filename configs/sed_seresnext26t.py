@@ -82,11 +82,11 @@ cfg.onnx_path = "outputs/sed_seresnext26t/onnx"
 cfg.openvino_path = "outputs/sed_seresnext26t/openvino"
 
 cfg.loss = {
-    "pretrain_ce": "ce",
-    "pretrain_bce": "bce",
-    "train_ce": "ce",
-    #"train_bce": "bce",
-    #"finetune": "bce",
+    "pretrain_ce": "soft_auc",
+    "pretrain_bce": "soft_auc",
+    "train_ce": "soft_auc",
+    #"train_bce": "soft_auc",
+    #"finetune": "soft_auc",
 }
 
 cfg.img_size = 256
