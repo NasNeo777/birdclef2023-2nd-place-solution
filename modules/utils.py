@@ -31,27 +31,29 @@ class SoftAUCLoss(nn.Module):
 
     def forward(self, preds, labels, sample_weights=None):
         labels = labels.to(dtype=preds.dtype)
-        pos_mask = labels > 0.5
-        neg_mask = labels < 0.5
-        pos_preds = preds[pos_mask]
-        neg_preds = preds[neg_mask]
-        pos_labels = labels[pos_mask]
-        neg_labels = labels[neg_mask]
-
-        if len(pos_preds) == 0 or len(neg_preds) == 0:
-            return preds.sum() * 0.0
-
-        pos_weights = torch.ones_like(pos_preds) * self.pos_weight * (pos_labels - 0.5)
-        neg_weights = torch.ones_like(neg_preds) * self.neg_weight * (0.5 - neg_labels)
         if sample_weights is not None:
             sample_weights = sample_weights.to(device=preds.device, dtype=preds.dtype)
-            sample_weights = sample_weights[:, None].expand_as(labels)
-            pos_weights = pos_weights * sample_weights[pos_mask]
-            neg_weights = neg_weights * sample_weights[neg_mask]
+        losses = []
+        for class_idx in range(labels.shape[1]):
+            class_labels = labels[:, class_idx]
+            pos_mask = class_labels > 0.5
+            neg_mask = class_labels < 0.5
+            if not torch.any(pos_mask) or not torch.any(neg_mask):
+                continue
 
-        diff = pos_preds.unsqueeze(1) - neg_preds.unsqueeze(0)  # [N_pos, N_neg]
-        loss_matrix = F.softplus(-diff * self.margin)  # [N_pos, N_neg]
+            pos_preds = preds[pos_mask, class_idx]
+            neg_preds = preds[neg_mask, class_idx]
+            pos_weights = self.pos_weight * (class_labels[pos_mask] - 0.5)
+            neg_weights = self.neg_weight * (0.5 - class_labels[neg_mask])
+            if sample_weights is not None:
+                pos_weights = pos_weights * sample_weights[pos_mask]
+                neg_weights = neg_weights * sample_weights[neg_mask]
 
-        weighted_loss = loss_matrix * pos_weights.unsqueeze(1) * neg_weights.unsqueeze(0)
+            diff = pos_preds[:, None] - neg_preds[None, :]
+            pair_weights = pos_weights[:, None] * neg_weights[None, :]
+            weighted_loss = F.softplus(-diff * self.margin) * pair_weights
+            losses.append(weighted_loss.sum() / pair_weights.sum().clamp_min(1e-6))
 
-        return weighted_loss.mean()
+        if not losses:
+            return preds.sum() * 0.0
+        return torch.stack(losses).mean()
