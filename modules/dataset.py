@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from modules.utils import crop_or_pad
 import multiprocessing
+import os
 
 class BirdTrainDataset(Dataset):
 
@@ -228,7 +229,13 @@ class BirdTrainDataset(Dataset):
         return audio, target , weight
 
 def get_train_dataloader(df_train, df_valid, df_labels_train, df_labels_valid, sample_weight,cfg,pseudo=None,transforms=None):
-  num_workers = multiprocessing.cpu_count()
+  env_num_workers = os.environ.get("BIRDCLEF_NUM_WORKERS")
+  if env_num_workers is not None:
+    num_workers = int(env_num_workers)
+  else:
+    num_workers = int(getattr(cfg, "num_workers", min(8, multiprocessing.cpu_count())))
+  num_workers = max(0, num_workers)
+  persistent_workers = num_workers > 0
   sample_weight = torch.from_numpy(sample_weight)
   sampler = WeightedRandomSampler(sample_weight.type('torch.DoubleTensor'), len(sample_weight),replacement=True)
 
@@ -248,6 +255,14 @@ def get_train_dataloader(df_train, df_valid, df_labels_train, df_labels_valid, s
       pseudo = None,
       transforms=None,
   )
-  dl_train = DataLoader(ds_train, batch_size=cfg.batch_size , sampler=sampler, num_workers = num_workers, pin_memory=True)
-  dl_val = DataLoader(ds_val, batch_size=cfg.test_batch_size, num_workers = num_workers, pin_memory=True)
+  loader_kwargs = {
+      "num_workers": num_workers,
+      "pin_memory": torch.cuda.is_available(),
+      "persistent_workers": persistent_workers,
+  }
+  if num_workers > 0:
+      loader_kwargs["prefetch_factor"] = int(getattr(cfg, "prefetch_factor", 2))
+
+  dl_train = DataLoader(ds_train, batch_size=cfg.batch_size , sampler=sampler, **loader_kwargs)
+  dl_val = DataLoader(ds_val, batch_size=cfg.test_batch_size, **loader_kwargs)
   return dl_train, dl_val, ds_train, ds_val

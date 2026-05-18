@@ -149,6 +149,7 @@ def main():
     print("Running trainer.fit")
     trainer.fit(model, train_dataloaders = dl_train, val_dataloaders = dl_val)
 
+    del dl_train, dl_val, ds_train, ds_val, trainer, model
     gc.collect()
     torch.cuda.empty_cache()
     return
