@@ -6,9 +6,12 @@ DRY_RUN=0
 CONTINUE_ON_ERROR=0
 SKIP_EXISTING=1
 INCLUDE_MODELS=""
+DEFAULT_BIRDSOUND_PYTHON="/home/nasneo/miniforge3/envs/BirdSound/bin/python"
 
 if [[ -n "${PYTHON_BIN:-}" ]]; then
   :
+elif [[ -x "$DEFAULT_BIRDSOUND_PYTHON" ]]; then
+  PYTHON_BIN="$DEFAULT_BIRDSOUND_PYTHON"
 elif [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/python" ]]; then
   PYTHON_BIN="${CONDA_PREFIX}/bin/python"
 elif command -v python >/dev/null 2>&1; then
@@ -86,11 +89,7 @@ preferred_models = [
     "cnn_b0ns",
 ]
 preferred_stages = [
-    "pretrain_ce",
-    "pretrain_bce",
-    "train_ce",
-    "train_bce",
-    "finetune",
+    "soft_loss",
 ]
 
 for model_name in preferred_models:

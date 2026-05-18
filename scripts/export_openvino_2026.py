@@ -31,7 +31,7 @@ DEFAULT_MODELS = [
 
 def final_stage(checkpoint_path: str) -> str:
     parts = Path(checkpoint_path).parts
-    for stage in ("finetune", "train_bce", "train_ce", "pretrain_bce", "pretrain_ce"):
+    for stage in ("soft_loss", "finetune", "train_bce", "train_ce", "pretrain_bce", "pretrain_ce"):
         if stage in parts:
             return stage
     raise ValueError(f"Cannot infer stage from {checkpoint_path}")

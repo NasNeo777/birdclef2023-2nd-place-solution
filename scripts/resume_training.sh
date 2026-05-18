@@ -9,7 +9,7 @@ python3 scripts/download_timm_weights.py
 
 echo ""
 echo "=== Step 2: Resume training ==="
-bash scripts/run_all_train_jobs.sh --continue-on-error
+bash scripts/run_all_train_jobs.sh --python /home/nasneo/miniforge3/envs/BirdSound/bin/python --continue-on-error
 
 echo ""
 echo "=== Step 3: Package Kaggle OpenVINO folder ==="

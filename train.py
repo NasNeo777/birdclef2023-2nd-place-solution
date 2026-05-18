@@ -50,7 +50,7 @@ def resolve_repo_path(repo_root, path_str):
 
 def make_parser():
     parser = argparse.ArgumentParser(description='parser')
-    parser.add_argument('--stage', required=True, choices=["pretrain_ce","pretrain_bce","train_ce","train_bce","finetune"])
+    parser.add_argument('--stage', required=True, choices=["soft_loss","pretrain_ce","pretrain_bce","train_ce","train_bce","finetune"])
     parser.add_argument('--model_name', required=True, choices=["sed_v2s",'sed_b3ns','sed_seresnext26t','cnn_v2s','cnn_resnet34d','cnn_b3ns','cnn_b0ns'])
     parser.add_argument('--use_pseudo', action='store_true')
     return parser

@@ -103,7 +103,7 @@ def compute_sample_weights(df, cfg, class_sample_count):
 def prepare_cfg(cfg,stage):
     if stage in ["pretrain_ce","pretrain_bce"]:
         cfg.bird_cols = cfg.bird_cols_pretrain
-    elif stage in ["train_ce","train_bce","finetune"]:
+    elif stage in ["soft_loss","train_ce","train_bce","finetune"]:
         cfg.bird_cols = cfg.bird_cols_train
     else:
         raise NotImplementedError
@@ -111,7 +111,7 @@ def prepare_cfg(cfg,stage):
     if stage == 'finetune':
         cfg.DURATION = cfg.DURATION_FINETUNE
         cfg.freeze = True
-    elif stage in ["pretrain_ce","pretrain_bce","train_ce","train_bce"]:
+    elif stage in ["soft_loss","pretrain_ce","pretrain_bce","train_ce","train_bce"]:
         cfg.DURATION = cfg.DURATION_TRAIN
     else:
         raise NotImplementedError
