@@ -385,7 +385,14 @@ class BirdClefModelBase(pl.LightningModule):
         self.epochs = cfg.epochs[stage]
         self.in_chans = cfg.in_chans
 
-        self.loss_function = SoftAUCLoss()
+        self.auc_loss_function = SoftAUCLoss()
+        self.bce_loss_function = nn.BCEWithLogitsLoss(reduction="none")
+        if self.loss == "ce":
+            self.ce_loss_function = nn.CrossEntropyLoss(
+                label_smoothing=self.cfg.label_smoothing, reduction="none"
+            )
+        elif self.loss not in {"bce", "bce_soft_auc"}:
+            raise NotImplementedError(f"unknown loss: {self.loss}")
         self.mixup = Mixup(
             mix_beta=self.cfg.mix_beta,
             mixup_prob=self.cfg.mixup_prob,
@@ -442,6 +449,31 @@ class BirdClefModelBase(pl.LightningModule):
         self.db_transform = torchaudio.transforms.AmplitudeToDB(
             stype="power", top_db=80
         )
+
+    def loss_function(self, logits, targets, sample_weights=None):
+        targets = targets.to(dtype=logits.dtype)
+        if self.loss == "ce":
+            loss = self.ce_loss_function(logits, targets)
+            if sample_weights is not None:
+                sample_weights = sample_weights.to(device=logits.device, dtype=logits.dtype)
+                loss = (loss * sample_weights).sum() / sample_weights.sum().clamp_min(1e-6)
+            else:
+                loss = loss.mean()
+            return loss
+
+        bce = self.bce_loss_function(logits, targets).sum(dim=1)
+        if sample_weights is not None:
+            sample_weights = sample_weights.to(device=logits.device, dtype=logits.dtype)
+            bce = (bce * sample_weights).sum() / sample_weights.sum().clamp_min(1e-6)
+        else:
+            bce = bce.mean()
+
+        if self.loss == "bce":
+            return bce
+
+        soft_auc_weight = float(getattr(self.cfg, "soft_auc_weight", 0.2))
+        auc = self.auc_loss_function(logits, targets, sample_weights=sample_weights)
+        return bce + soft_auc_weight * auc
 
     def lower_upper_freq(self, images):
         # images = images - images.min(1,keepdim=True).values.min(2,keepdim=True).values.min(3,keepdim=True).values

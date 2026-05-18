@@ -29,7 +29,11 @@ cfg.secondary_label_weight = 0.5
 cfg.batch_size = 48
 cfg.PRECISION = 32
 cfg.seed = {
-    "soft_loss": 19000115,
+    #"pretrain_ce": 19940215,
+    "pretrain_bce": 19000115,
+    "train_ce": 19931019,
+    #"train_bce": 20231911,
+    #"finetune": 20230523,
 }
 cfg.DURATION_TRAIN = 10
 cfg.DURATION_FINETUNE = 30
@@ -43,27 +47,48 @@ cfg.mix_beta = 5
 cfg.mix_beta2 = 2
 cfg.in_chans = 1
 cfg.epochs = {
-    "soft_loss": 90,
+    #"pretrain_ce": 80,
+    "pretrain_bce": 90,
+    "train_ce": 60,
+    #"train_bce": 30,
+    #"finetune": 10,
 }
 cfg.lr = {
-    "soft_loss": 3e-4,
+    #"pretrain_ce": 3e-4,
+    "pretrain_bce": 1e-3,
+    "train_ce": 3e-4,
+    #"train_bce": 1e-3,
+    #"finetune": 6e-4,
 }
 
 cfg.model_ckpt = {
-    "soft_loss": None,
+    #"pretrain_ce": None,
+    "pretrain_bce": None,
+    "train_ce": "outputs/resnet34/pytorch/pretrain_bce/last.ckpt",
+    #"train_bce": "outputs/sed_resnet34/pytorch/train_ce/last.ckpt",
+    #"finetune": "outputs/sed_resnet34/pytorch/train_bce/last.ckpt",
 }
 
 cfg.output_path = {
-    "soft_loss": "outputs/sed_resnet34/pytorch/soft_loss",
+    #"pretrain_ce": "outputs/sed_resnet34/pytorch/pretrain_ce",
+    "pretrain_bce": "outputs/sed_resnet34/pytorch/pretrain_bce",
+    "train_ce": "outputs/sed_resnet34/pytorch/train_ce",
+    #"train_bce": "outputs/sed_resnet34/pytorch/train_bce",
+    #"finetune": "outputs/sed_resnet34/pytorch/finetune",
 }
 
-cfg.final_model_path = "outputs/sed_resnet34/pytorch/soft_loss/last.ckpt"
+cfg.final_model_path = "outputs/sed_resnet34/pytorch/train_ce/last.ckpt"
 cfg.onnx_path = "outputs/sed_resnet34/onnx"
 cfg.openvino_path = "outputs/sed_resnet34/openvino"
 
 cfg.loss = {
-    "soft_loss": "soft_auc",
+    #"pretrain_ce": "ce",
+    "pretrain_bce": "bce",
+    "train_ce": "ce",
+    #"train_bce": "bce_soft_auc",
+    #"finetune": "bce_soft_auc",
 }
+cfg.soft_auc_weight = 0.2
 
 cfg.img_size = 224
 cfg.n_mels = 128

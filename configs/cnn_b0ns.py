@@ -31,7 +31,7 @@ cfg.secondary_label_weight = 0.5
 cfg.batch_size = 128
 cfg.PRECISION = 32
 cfg.seed = {
-    "soft_loss": 202111210524,
+    "train_ce": 202111210524,
 }
 cfg.DURATION_TRAIN = 20
 cfg.DURATION_FINETUNE = 30
@@ -45,27 +45,28 @@ cfg.mix_beta = 5
 cfg.mix_beta2 = 1
 cfg.in_chans = 1
 cfg.epochs = {
-    "soft_loss": 50,
+    "train_ce": 50,
 }
 cfg.lr = {
-    "soft_loss": 3e-4,
+    "train_ce": 3e-4,
 }
 
 cfg.model_ckpt = {
-    "soft_loss": None,
+    "train_ce": None,
 }
 
 cfg.output_path = {
-    "soft_loss": "outputs/cnn_b0ns/pytorch/soft_loss",
+    "train_ce": "outputs/cnn_b0ns/pytorch/train_ce",
 }
 
-cfg.final_model_path = "outputs/cnn_b0ns/pytorch/soft_loss/last.ckpt"
+cfg.final_model_path = "outputs/cnn_b0ns/pytorch/train_ce/last.ckpt"
 cfg.onnx_path = "outputs/cnn_b0ns/onnx"
 cfg.openvino_path = "outputs/cnn_b0ns/openvino"
 
 cfg.loss = {
-    "soft_loss": "soft_auc",
+    "train_ce": "ce",
 }
+cfg.soft_auc_weight = 0.2
 
 cfg.img_size = 256
 cfg.n_mels = 128

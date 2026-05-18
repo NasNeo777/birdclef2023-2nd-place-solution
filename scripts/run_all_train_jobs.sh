@@ -89,7 +89,11 @@ preferred_models = [
     "cnn_b0ns",
 ]
 preferred_stages = [
-    "soft_loss",
+    "pretrain_ce",
+    "pretrain_bce",
+    "train_ce",
+    "train_bce",
+    "finetune",
 ]
 
 for model_name in preferred_models:
