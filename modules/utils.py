@@ -23,11 +23,10 @@ def crop_or_pad(y, length, is_train=True, start=None):
 
 
 class SoftAUCLoss(nn.Module):
-    def __init__(self, margin=1.0, pos_weight=1.0, neg_weight=1.0):
+    def __init__(self, margin=1.0, min_label_gap=1e-6):
         super().__init__()
         self.margin = margin
-        self.pos_weight = pos_weight
-        self.neg_weight = neg_weight
+        self.min_label_gap = min_label_gap
 
     def forward(self, preds, labels, sample_weights=None):
         labels = labels.to(dtype=preds.dtype)
@@ -36,23 +35,21 @@ class SoftAUCLoss(nn.Module):
         losses = []
         for class_idx in range(labels.shape[1]):
             class_labels = labels[:, class_idx]
-            pos_mask = class_labels > 0.5
-            neg_mask = class_labels < 0.5
-            if not torch.any(pos_mask) or not torch.any(neg_mask):
+            label_diff = class_labels[:, None] - class_labels[None, :]
+            pair_mask = label_diff > self.min_label_gap
+            if not torch.any(pair_mask):
                 continue
 
-            pos_preds = preds[pos_mask, class_idx]
-            neg_preds = preds[neg_mask, class_idx]
-            pos_weights = self.pos_weight * (class_labels[pos_mask] - 0.5)
-            neg_weights = self.neg_weight * (0.5 - class_labels[neg_mask])
+            pred_diff = preds[:, class_idx][:, None] - preds[:, class_idx][None, :]
+            pair_weights = label_diff.clamp_min(0.0)
             if sample_weights is not None:
-                pos_weights = pos_weights * sample_weights[pos_mask]
-                neg_weights = neg_weights * sample_weights[neg_mask]
+                pair_weights = pair_weights * sample_weights[:, None] * sample_weights[None, :]
 
-            diff = pos_preds[:, None] - neg_preds[None, :]
-            pair_weights = pos_weights[:, None] * neg_weights[None, :]
-            weighted_loss = F.softplus(-diff * self.margin) * pair_weights
-            losses.append(weighted_loss.sum() / pair_weights.sum().clamp_min(1e-6))
+            weighted_loss = F.softplus(-pred_diff * self.margin) * pair_weights
+            losses.append(
+                weighted_loss[pair_mask].sum()
+                / pair_weights[pair_mask].sum().clamp_min(1e-6)
+            )
 
         if not losses:
             return preds.sum() * 0.0
