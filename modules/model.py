@@ -49,14 +49,22 @@ def padded_cmap(solution, submission, padding_factor=5):
 
 
 def birdclef2026_metric(solution, submission):
-    """Macro-averaged ROC-AUC skipping classes with no true positive labels."""
+    """Macro-averaged ROC-AUC skipping classes with no true positive or true negative labels."""
     solution_sums = solution.sum(axis=0)
     scored_columns = list(solution_sums[solution_sums > 0].index.values)
     if len(scored_columns) == 0:
         return 0.0
+    valid_columns = []
+    for col in scored_columns:
+        y_true = solution[col].values
+        if len(set(y_true)) < 2:
+            continue
+        valid_columns.append(col)
+    if len(valid_columns) == 0:
+        return 0.0
     return sklearn.metrics.roc_auc_score(
-        solution[scored_columns].values,
-        submission[scored_columns].values,
+        solution[valid_columns].values,
+        submission[valid_columns].values,
         average="macro",
     )
 

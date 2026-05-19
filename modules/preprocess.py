@@ -118,8 +118,8 @@ def prepare_cfg(cfg,stage):
 
     if getattr(cfg, "fixed_clip_mode", False):
         cfg.train_part = int(cfg.DURATION / cfg.infer_duration)
-        cfg.valid_part = int(cfg.valid_duration / cfg.DURATION)
-        cfg.test_batch_size = max(int(cfg.batch_size / cfg.valid_part), 2)
+        cfg.valid_part = cfg.train_part
+        cfg.test_batch_size = max(int(cfg.batch_size), 2)
     else:
         cfg.test_batch_size = int(
             np.max([int(cfg.batch_size / (int(cfg.valid_duration) / cfg.DURATION)), 2])
