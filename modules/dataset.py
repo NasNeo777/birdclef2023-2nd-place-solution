@@ -76,10 +76,17 @@ class BirdTrainDataset(Dataset):
 
         clip_start_sec = row.get("clip_start_sec", np.nan)
         if getattr(self.cfg, "fixed_clip_mode", False) and not np.isnan(clip_start_sec):
-            offset = float(clip_start_sec)
-            clip_duration = float(row.get("clip_duration", self.duration))
+            clip_start = float(clip_start_sec)
+            clip_dur = float(row.get("clip_duration", self.duration))
+            if clip_dur < self.duration:
+                extra = self.duration - clip_dur
+                offset = max(0.0, clip_start - extra / 2)
+                load_dur = self.duration
+            else:
+                offset = clip_start
+                load_dur = clip_dur
             audio_sample, orig_sr = lb.load(
-                filepath, sr=None, mono=True, offset=offset, duration=clip_duration
+                filepath, sr=None, mono=True, offset=offset, duration=load_dur
             )
             if self.resample and orig_sr != self.sr:
                 audio_sample = lb.resample(

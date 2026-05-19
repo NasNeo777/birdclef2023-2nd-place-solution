@@ -117,11 +117,9 @@ def prepare_cfg(cfg,stage):
         raise NotImplementedError
 
     if getattr(cfg, "fixed_clip_mode", False):
-        cfg.DURATION = cfg.infer_duration
-        cfg.valid_duration = cfg.infer_duration
-        cfg.test_batch_size = max(int(cfg.batch_size), 2)
-        cfg.train_part = 1
-        cfg.valid_part = 1
+        cfg.train_part = int(cfg.DURATION / cfg.infer_duration)
+        cfg.valid_part = int(cfg.valid_duration / cfg.DURATION)
+        cfg.test_batch_size = max(int(cfg.batch_size / cfg.valid_part), 2)
     else:
         cfg.test_batch_size = int(
             np.max([int(cfg.batch_size / (int(cfg.valid_duration) / cfg.DURATION)), 2])
