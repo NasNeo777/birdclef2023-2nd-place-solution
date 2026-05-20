@@ -97,14 +97,4 @@ The Kaggle inference notebooks load all 7 OpenVINO models and average prediction
 
 ## Skills
 
-### `/metrics` — 查看训练指标
-
-```bash
-python3 scripts/metrics.py                # 当前训练状态（默认）
-python3 scripts/metrics.py --latest       # 当前训练状态
-python3 scripts/metrics.py --compare      # 修复前后 sed_v2s 对比
-python3 scripts/metrics.py --history      # 所有训练历史（按模型+session分组）
-python3 scripts/metrics.py --watch        # 实时监控（每30秒刷新）
-```
-
-从 `wandb/` 目录的 summary 和 metadata 中提取所有训练 run 的 epoch、loss、ROC-AUC 指标，按模型和阶段整理展示。自动检测正在运行的训练任务。
+- `/metrics` — 查看训练指标（当前状态、修复对比、历史、实时监控）。参见 `.claude/skills/metrics.md`。
