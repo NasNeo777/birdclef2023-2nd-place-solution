@@ -131,9 +131,13 @@ def get_stage_status(runs, model, stage, running):
 
     # Only show completed if checkpoint file exists (current session only)
     if check_ckpt_exists(model, stage):
+        best = None
         for r in runs:
             if r["model"] == model and r["stage"] == stage and r["val_auc"] is not None:
-                return ("done", r["val_auc"], None)
+                if best is None or r["dt"] > best["dt"]:
+                    best = r
+        if best:
+            return ("done", best["val_auc"], None)
 
     return ("pending", None, None)
 
