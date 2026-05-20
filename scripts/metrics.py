@@ -111,48 +111,69 @@ def iso(dt):
     return dt.strftime("%m-%d %H:%M") if dt else "??"
 
 
+def get_latest_per_stage(runs):
+    """Get the latest W&B run for each (model, stage) combination."""
+    latest = {}  # (model, stage) -> run_info
+    for r in runs:
+        key = (r["model"], r["stage"])
+        if key not in latest or r["dt"] > latest[key]["dt"]:
+            latest[key] = r
+    return latest
+
+
+def get_stage_status(runs, model, stage, running):
+    """Determine status of a stage: completed (AUC), running, or pending.
+    Only shows data from the current training session (has checkpoint OR is running).
+    """
+    # Check if currently running
+    if running and running["model"] == model and running["stage"] == stage:
+        return ("running", running["val_auc"], running["epoch"])
+
+    # Only show completed if checkpoint file exists (current session only)
+    if check_ckpt_exists(model, stage):
+        for r in runs:
+            if r["model"] == model and r["stage"] == stage and r["val_auc"] is not None:
+                return ("done", r["val_auc"], None)
+
+    return ("pending", None, None)
+
+
 def print_latest_session():
     """Show only the current/latest training session with checkpoints."""
     runs = get_all_runs()
-    # Find runs that have checkpoints
-    ckpt_runs = [r for r in runs if check_ckpt_exists(r["model"], r["stage"])]
-
-    if not ckpt_runs:
-        print("No completed checkpoints found.")
-        return
-
-    # Group by model
-    models_seen = {}
-    for r in ckpt_runs:
-        if r["model"] not in models_seen or r["dt"] > models_seen[r["model"]]["dt"]:
-            models_seen[r["model"]] = r
-
-    # Also check running jobs
     running = get_running_job()
+    latest = get_latest_per_stage(runs)
 
     print(f"\n{BOLD}=== 当前训练状态 ({datetime.now().strftime('%m-%d %H:%M')}) ==={RESET}\n")
-    header = f"{'模型':<22} {'pretrain_ce':>10} {'pretrain_bce':>10} {'train_ce':>10} {'train_bce':>10} {'finetune':>10}"
+    header = f"{'模型':<22} {'pretrain_ce':>12} {'pretrain_bce':>12} {'train_ce':>12} {'train_bce':>12} {'finetune':>12}"
     print(header)
-    print("-" * 72)
+    print("-" * 82)
 
     for model in MODEL_ORDER:
         row = f"{model:<22}"
         for stage in STAGE_ORDER[:5]:
-            match = [r for r in ckpt_runs if r["model"] == model and r["stage"] == stage]
-            # Prefer latest per model+stage
-            match.sort(key=lambda r: r["dt"], reverse=True)
-            if match:
-                row += format_auc(match[0]["val_auc"])
+            status, auc, epoch = get_stage_status(runs, model, stage, running)
+            if status == "done":
+                row += format_auc(auc)
+            elif status == "running":
+                row += f" {YELLOW}{auc:>7.4f}{RESET}" if auc else f" {YELLOW}  run{RESET}  "
+            elif status == "no_ckpt":
+                row += f" {RED}{auc:>7.4f}{RESET}"
             else:
-                # Check if running
-                if running and running["model"] == model and running["stage"] == stage:
-                    row += f" {YELLOW}run{RESET}  "
-                else:
-                    row += "     -   "
+                row += "       -    "
         print(row)
 
+    # Show running job details
     if running:
-        print(f"\n{YELLOW}● 正在运行: {running['model']}/{running['stage']} epoch={running['epoch']} AUC={running['val_auc']:.4f}{RESET}")
+        print(f"\n{YELLOW}● 运行中: {running['model']}/{running['stage']}  epoch={running['epoch']}  step={running['step']}{RESET}")
+        if running["train_loss"]:
+            print(f"  train_loss={running['train_loss']:.4f}  val_loss={running['val_loss']:.4f}  val_AUC={running['val_auc']:.4f}")
+
+    # Progress summary
+    all_stages = [(m, s) for m in MODEL_ORDER for s in STAGE_ORDER[:5]]
+    done = sum(1 for m, s in all_stages if check_ckpt_exists(m, s))
+    in_progress = 1 if running else 0
+    print(f"\n进度: {done}/35 阶段完成, {in_progress} 运行中, {35 - done - in_progress} 待运行")
 
 
 def get_running_job():
