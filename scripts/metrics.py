@@ -41,18 +41,6 @@ def get_stage_epochs(model):
     return epochs
 
 
-def get_batch_size(model):
-    """Read batch_size from config file."""
-    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                               "configs", f"{model}.py")
-    if os.path.exists(config_path):
-        with open(config_path) as f:
-            for line in f:
-                m = re.match(r'cfg\.batch_size\s*=\s*(\d+)', line)
-                if m:
-                    return int(m.group(1))
-    return 64  # default guess
-
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
@@ -322,7 +310,6 @@ def print_full_history():
 def calc_eta():
     """Calculate estimated completion time for all remaining stages."""
     running = get_running_job()
-    all_runs = get_all_runs()
 
     # Determine which models/stages are already done
     done = set()
@@ -333,8 +320,9 @@ def calc_eta():
     if running:
         done.add((running["model"], running["stage"]))
 
-    # Find the running job's timing
-    min_per_epoch = 4.0  # default
+    # Default per-epoch time (minutes) at standard batch size.
+    default_min_per_epoch = 4.0
+    running_min_per_epoch = 4.0  # measured from running job
     current_model = None
     current_stage = None
     current_epoch = 0
@@ -344,7 +332,7 @@ def calc_eta():
         current_stage = running["stage"]
         current_epoch = running.get("epoch", 0) or 0
 
-        # Estimate time per epoch from the running run's log
+        # Measure per-epoch time from W&B summary (_runtime / epoch).
         for run_dir in sorted(glob.glob(os.path.join(WANDB_DIR, "run-*")), reverse=True):
             meta_path = os.path.join(run_dir, "files", "wandb-metadata.json")
             if not os.path.exists(meta_path):
@@ -353,26 +341,14 @@ def calc_eta():
                 meta = json.load(f)
             if meta.get("state") != "running":
                 continue
-            history_path = os.path.join(run_dir, "files", "wandb-history.jsonl")
-            if os.path.exists(history_path):
-                with open(history_path) as f:
-                    lines = f.readlines()
-                epochs_seen = []
-                for line in lines:
-                    try:
-                        d = json.loads(line)
-                        if "epoch" in d and d["epoch"] is not None:
-                            ts = d.get("_timestamp", 0)
-                            if ts > 10000000000:
-                                ts /= 1000
-                            epochs_seen.append((d["epoch"], ts))
-                    except Exception:
-                        pass
-                if len(epochs_seen) >= 2:
-                    elapsed = epochs_seen[-1][1] - epochs_seen[0][1]
-                    n = len(epochs_seen) - 1
-                    if n > 0 and elapsed > 60:
-                        min_per_epoch = elapsed / n / 60
+            summary_path = os.path.join(run_dir, "files", "wandb-summary.json")
+            if os.path.exists(summary_path):
+                with open(summary_path) as f:
+                    summary = json.load(f)
+                runtime = summary.get("_runtime", 0)
+                epoch = summary.get("epoch", 0)
+                if runtime > 120 and epoch >= 1:
+                    running_min_per_epoch = (runtime / 60) / epoch
             break
 
     now = datetime.now()
@@ -385,9 +361,9 @@ def calc_eta():
 
     for model in MODEL_ORDER:
         epochs = get_stage_epochs(model)
-        bs = get_batch_size(model)
-        # CNN models are typically faster per epoch
-        cnn_factor = 0.75 if model.startswith("cnn") else 1.0
+
+        # Use measured time for the running model, default for others.
+        min_per_epoch = running_min_per_epoch if model == current_model else default_min_per_epoch
 
         for stage in STAGE_ORDER[:5]:
             if stage not in epochs:
@@ -408,7 +384,7 @@ def calc_eta():
 
             # finetune has longer clip duration so slower per epoch
             sf = 1.5 if stage == "finetune" else 1.0
-            stage_min = remaining * min_per_epoch * cnn_factor * sf
+            stage_min = remaining * min_per_epoch * sf
             total_minutes += stage_min
 
             finish = now + timedelta(minutes=total_minutes)
