@@ -3,6 +3,11 @@ import importlib
 from pathlib import Path
 import warnings
 import os
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("WANDB_SILENT", "true")
+
 from modules.preprocess import preprocess,prepare_cfg
 from modules.dataset import get_train_dataloader
 from modules.model import load_model
@@ -13,9 +18,6 @@ import torch
 import wandb
 import gc
 import json
-
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("WANDB_SILENT", "true")
 
 warnings.filterwarnings(
     "ignore",
@@ -39,6 +41,38 @@ warnings.filterwarnings(
 )
 
 torch.set_float32_matmul_precision("medium")
+
+def env_override(prefix, model_name, stage):
+    model_name = model_name.upper()
+    stage = stage.upper()
+    for key in (
+        f"{prefix}_{model_name}_{stage}",
+        f"{prefix}_{model_name}",
+        prefix,
+    ):
+        if key in os.environ:
+            return key, os.environ[key]
+    return None, None
+
+
+def int_env_override(prefix, model_name, stage, default):
+    key, value = env_override(prefix, model_name, stage)
+    if value is None:
+        return default
+    value = int(value)
+    if value < 1:
+        raise ValueError(f"{key} must be >= 1")
+    print(f"{key} override: {default} -> {value}")
+    return value
+
+
+def precision_env_override(prefix, model_name, stage, default):
+    key, value = env_override(prefix, model_name, stage)
+    if value is None:
+        return default
+    precision = int(value) if value.isdigit() else value
+    print(f"{key} override: {default} -> {precision}")
+    return precision
 
 
 def resolve_repo_path(repo_root, path_str):
@@ -64,7 +98,15 @@ def main():
     model_name = args.model_name
     use_pseudo = args.use_pseudo
     cfg = importlib.import_module(f'configs.{model_name}').basic_cfg
+    cfg.batch_size = int_env_override("BIRDCLEF_BATCH_SIZE", model_name, stage, int(cfg.batch_size))
+    cfg.PRECISION = precision_env_override("BIRDCLEF_PRECISION", model_name, stage, cfg.PRECISION)
     cfg = prepare_cfg(cfg,stage)
+    accumulate_grad_batches = int_env_override(
+        "BIRDCLEF_ACCUMULATE_GRAD_BATCHES",
+        model_name,
+        stage,
+        1,
+    )
     os.environ['WANDB_API_KEY'] = cfg.WANDB_API_KEY
 
     if use_pseudo and not getattr(cfg, "allow_pseudo", True):
@@ -143,7 +185,9 @@ def main():
         log_every_n_steps=1,
         logger=logger,
         callbacks=callbacks_to_use,
-        precision=cfg.PRECISION, accelerator="auto",
+        precision=cfg.PRECISION,
+        accelerator="auto",
+        accumulate_grad_batches=accumulate_grad_batches,
     )
 
     print("Running trainer.fit")
