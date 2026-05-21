@@ -8,8 +8,8 @@ Usage:
     python3 scripts/metrics.py --watch       # continuously monitor current training
 """
 
-import os, sys, json, glob, time
-from datetime import datetime
+import os, sys, json, glob, time, re
+from datetime import datetime, timedelta
 from argparse import ArgumentParser
 
 WANDB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "wandb")
@@ -18,6 +18,40 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # Model order for display
 MODEL_ORDER = ["sed_v2s", "sed_b3ns", "sed_seresnext26t", "cnn_v2s", "cnn_resnet34d", "cnn_b3ns", "cnn_b0ns"]
 STAGE_ORDER = ["pretrain_ce", "pretrain_bce", "train_ce", "train_bce", "finetune", "soft_loss"]
+
+# Epoch configs per model (read from config files at runtime)
+_EPOCHS_CACHE = {}
+
+
+def get_stage_epochs(model):
+    """Read total epochs per stage from config file."""
+    if model in _EPOCHS_CACHE:
+        return _EPOCHS_CACHE[model]
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "configs", f"{model}.py")
+    epochs = {}
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            content = f.read()
+        match = re.search(r'cfg\.epochs\s*=\s*\{([^}]+)\}', content, re.DOTALL)
+        if match:
+            for kv in re.findall(r'"([^"]+)"\s*:\s*(\d+)', match.group(1)):
+                epochs[kv[0]] = int(kv[1])
+    _EPOCHS_CACHE[model] = epochs
+    return epochs
+
+
+def get_batch_size(model):
+    """Read batch_size from config file."""
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "configs", f"{model}.py")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            for line in f:
+                m = re.match(r'cfg\.batch_size\s*=\s*(\d+)', line)
+                if m:
+                    return int(m.group(1))
+    return 64  # default guess
 
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
@@ -179,6 +213,10 @@ def print_latest_session():
     in_progress = 1 if running else 0
     print(f"\n进度: {done}/35 阶段完成, {in_progress} 运行中, {35 - done - in_progress} 待运行")
 
+    # ETA
+    print(f"\n{BOLD}--- 预估完成时间 ---{RESET}")
+    print(calc_eta())
+
 
 def get_running_job():
     """Detect currently running training job from W&B."""
@@ -281,6 +319,118 @@ def print_full_history():
         print()
 
 
+def calc_eta():
+    """Calculate estimated completion time for all remaining stages."""
+    running = get_running_job()
+    all_runs = get_all_runs()
+
+    # Determine which models/stages are already done
+    done = set()
+    for model in MODEL_ORDER:
+        for stage in STAGE_ORDER[:5]:
+            if check_ckpt_exists(model, stage):
+                done.add((model, stage))
+    if running:
+        done.add((running["model"], running["stage"]))
+
+    # Find the running job's timing
+    min_per_epoch = 4.0  # default
+    current_model = None
+    current_stage = None
+    current_epoch = 0
+
+    if running:
+        current_model = running["model"]
+        current_stage = running["stage"]
+        current_epoch = running.get("epoch", 0) or 0
+
+        # Estimate time per epoch from the running run's log
+        for run_dir in sorted(glob.glob(os.path.join(WANDB_DIR, "run-*")), reverse=True):
+            meta_path = os.path.join(run_dir, "files", "wandb-metadata.json")
+            if not os.path.exists(meta_path):
+                continue
+            with open(meta_path) as f:
+                meta = json.load(f)
+            if meta.get("state") != "running":
+                continue
+            history_path = os.path.join(run_dir, "files", "wandb-history.jsonl")
+            if os.path.exists(history_path):
+                with open(history_path) as f:
+                    lines = f.readlines()
+                epochs_seen = []
+                for line in lines:
+                    try:
+                        d = json.loads(line)
+                        if "epoch" in d and d["epoch"] is not None:
+                            ts = d.get("_timestamp", 0)
+                            if ts > 10000000000:
+                                ts /= 1000
+                            epochs_seen.append((d["epoch"], ts))
+                    except Exception:
+                        pass
+                if len(epochs_seen) >= 2:
+                    elapsed = epochs_seen[-1][1] - epochs_seen[0][1]
+                    n = len(epochs_seen) - 1
+                    if n > 0 and elapsed > 60:
+                        min_per_epoch = elapsed / n / 60
+            break
+
+    now = datetime.now()
+    total_minutes = 0
+    found_current = not running  # if nothing is running, skip to next model
+
+    lines = []
+    lines.append(f"{'模型':<22} {'阶段':<15} {'剩余ep':>6} {'耗时':>8} {'完成时间':>16}")
+    lines.append("-" * 72)
+
+    for model in MODEL_ORDER:
+        epochs = get_stage_epochs(model)
+        bs = get_batch_size(model)
+        # CNN models are typically faster per epoch
+        cnn_factor = 0.75 if model.startswith("cnn") else 1.0
+
+        for stage in STAGE_ORDER[:5]:
+            if stage not in epochs:
+                continue
+            total_ep = epochs[stage]
+
+            if (model, stage) in done:
+                if model == current_model and stage == current_stage and found_current:
+                    pass  # currently running, will handle below
+                else:
+                    continue  # already finished
+
+            if model == current_model and stage == current_stage:
+                found_current = True
+                remaining = max(0, total_ep - current_epoch)
+            else:
+                remaining = total_ep
+
+            # finetune has longer clip duration so slower per epoch
+            sf = 1.5 if stage == "finetune" else 1.0
+            stage_min = remaining * min_per_epoch * cnn_factor * sf
+            total_minutes += stage_min
+
+            finish = now + timedelta(minutes=total_minutes)
+            lines.append(
+                f"{model:<22} {stage:<15} {remaining:>4}ep  {stage_min:>6.0f}min  "
+                f"{finish.strftime('%m-%d %H:%M'):>16}"
+            )
+
+    if total_minutes == 0:
+        lines.append("\n全部训练已完成！")
+    else:
+        lines.append(f"\n总计剩余: {total_minutes/60:.0f} 小时 ({total_minutes/60/24:.1f} 天)")
+        lines.append(f"预计全部完成: {(now + timedelta(minutes=total_minutes)).strftime('%m-%d %H:%M')}")
+
+    return "\n".join(lines)
+
+
+def print_eta():
+    print(f"\n{BOLD}=== 训练完成时间预估 ({datetime.now().strftime('%m-%d %H:%M')}) ==={RESET}\n")
+    print(calc_eta())
+
+
 def print_watch():
     """Continuously monitor current training with live refresh."""
     print(f"{BOLD}监控训练进度 (Ctrl+C 退出){RESET}")
@@ -322,14 +472,17 @@ def main():
     parser.add_argument("--compare", action="store_true", help="Compare pre-fix vs post-fix")
     parser.add_argument("--history", action="store_true", help="Show full training history")
     parser.add_argument("--watch", action="store_true", help="Continuously monitor live training")
+    parser.add_argument("--eta", action="store_true", help="Show estimated completion time")
     args = parser.parse_args()
 
     # Default to --latest if no args
-    if not any([args.latest, args.compare, args.history, args.watch]):
+    if not any([args.latest, args.compare, args.history, args.watch, args.eta]):
         args.latest = True
 
     if args.watch:
         print_watch()
+    elif args.eta:
+        print_eta()
     elif args.compare:
         print_compare()
         print_latest_session()
