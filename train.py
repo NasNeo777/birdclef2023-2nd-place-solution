@@ -8,7 +8,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("WANDB_SILENT", "true")
 
-from modules.preprocess import preprocess,prepare_cfg
+from modules.preprocess import preprocess, prepare_cfg
 from modules.dataset import get_train_dataloader
 from modules.model import load_model
 import pytorch_lightning as pl
@@ -42,13 +42,14 @@ warnings.filterwarnings(
 
 torch.set_float32_matmul_precision("medium")
 
+
 def env_override(prefix, model_name, stage):
     model_name = model_name.upper()
     stage = stage.upper()
     for key in (
-        f"{prefix}_{model_name}_{stage}",
-        f"{prefix}_{model_name}",
-        prefix,
+            f"{prefix}_{model_name}_{stage}",
+            f"{prefix}_{model_name}",
+            prefix,
     ):
         if key in os.environ:
             return key, os.environ[key]
@@ -108,8 +109,11 @@ def resolve_repo_path(repo_root, path_str):
 
 def make_parser():
     parser = argparse.ArgumentParser(description='parser')
-    parser.add_argument('--stage', required=True, choices=["pretrain_ce","pretrain_bce","train_ce","train_bce","finetune"])
-    parser.add_argument('--model_name', required=True, choices=["sed_v2s",'sed_b3ns','sed_seresnext26t','cnn_v2s','cnn_resnet34d','cnn_b3ns','cnn_b0ns'])
+    parser.add_argument('--stage', required=True,
+                        choices=["pretrain_ce", "pretrain_bce", "train_ce", "train_bce", "finetune"])
+    parser.add_argument('--model_name', required=True,
+                        choices=["sed_v2s", 'sed_b3ns', 'sed_seresnext26t', 'cnn_v2s', 'cnn_resnet34d', 'cnn_b3ns',
+                                 'cnn_b0ns'])
     parser.add_argument('--use_pseudo', action='store_true')
     return parser
 
@@ -125,14 +129,15 @@ def main():
     cfg.batch_size = int_env_override("BIRDCLEF_BATCH_SIZE", model_name, stage, int(cfg.batch_size))
     cfg.PRECISION = precision_env_override("BIRDCLEF_PRECISION", model_name, stage, cfg.PRECISION)
     cfg.use_llrd = bool_env_override("BIRDCLEF_USE_LLRD", model_name, stage, bool(getattr(cfg, "use_llrd", False)))
-    cfg.llrd_decay = float_env_override("BIRDCLEF_LLRD_DECAY", model_name, stage, float(getattr(cfg, "llrd_decay", 0.8)))
+    cfg.llrd_decay = float_env_override("BIRDCLEF_LLRD_DECAY", model_name, stage,
+                                        float(getattr(cfg, "llrd_decay", 0.8)))
     cfg.llrd_head_lr_mult = float_env_override(
         "BIRDCLEF_LLRD_HEAD_LR_MULT",
         model_name,
         stage,
         float(getattr(cfg, "llrd_head_lr_mult", 1.0)),
     )
-    cfg = prepare_cfg(cfg,stage)
+    cfg = prepare_cfg(cfg, stage)
     accumulate_grad_batches = int_env_override(
         "BIRDCLEF_ACCUMULATE_GRAD_BATCHES",
         model_name,
@@ -144,7 +149,7 @@ def main():
     if use_pseudo and not getattr(cfg, "allow_pseudo", True):
         raise ValueError("Pseudo-label training is not implemented for the 2026 soundscape dataset")
 
-    seed = int(cfg.seed[stage]) % (2**32)
+    seed = int(cfg.seed[stage]) % (2 ** 32)
     pl.seed_everything(seed, workers=True)
 
     df_train, df_valid, df_label_train, df_label_valid, sample_weight, transforms = preprocess(cfg)
@@ -175,7 +180,8 @@ def main():
                     for second in hand_label['pred'][version][filename][label].keys():
                         for i in range(len(pseudo['subset1']['pseudo'])):
                             if second in pseudo['subset1']['pseudo'][i]['pred'][version][filename][label].keys():
-                                pseudo['subset1']['pseudo'][i]['pred'][version][filename][label][second] = hand_label['pred'][version][filename][label][second]
+                                pseudo['subset1']['pseudo'][i]['pred'][version][filename][label][second] = \
+                                hand_label['pred'][version][filename][label][second]
         # =========================================================
 
     dl_train, dl_val, ds_train, ds_val = get_train_dataloader(
@@ -190,25 +196,25 @@ def main():
     )
 
     logger = WandbLogger(
-        project=f'BirdClef-SoftLoss-{cfg.dataset_version}',
+        project=f'BirdClef-SoftLoss-LLRD-{cfg.dataset_version}',
         name=f'{model_name}_{stage}',
         settings=wandb.Settings(quiet=True, console="off"),
     )
     checkpoint_callback = ModelCheckpoint(
-        #monitor='val_loss',
+        # monitor='val_loss',
         monitor=None,
-        dirpath= cfg.output_path[stage],
+        dirpath=cfg.output_path[stage],
         save_top_k=0,
-        save_last= True,
+        save_last=True,
         save_weights_only=True,
-        #filename= './ckpt_epoch_{epoch}_val_loss_{val_loss:.2f}',
-        #filename ='./ckpt_{epoch}_{val_loss}',
-        verbose= True,
+        # filename= './ckpt_epoch_{epoch}_val_loss_{val_loss:.2f}',
+        # filename ='./ckpt_{epoch}_{val_loss}',
+        verbose=True,
         every_n_epochs=1,
         mode='min'
     )
     callbacks_to_use = [checkpoint_callback]
-    model = load_model(cfg,stage)
+    model = load_model(cfg, stage)
     trainer = pl.Trainer(
         devices=1,
         val_check_interval=1.0,
@@ -223,12 +229,13 @@ def main():
     )
 
     print("Running trainer.fit")
-    trainer.fit(model, train_dataloaders = dl_train, val_dataloaders = dl_val)
+    trainer.fit(model, train_dataloaders=dl_train, val_dataloaders=dl_val)
 
     del dl_train, dl_val, ds_train, ds_val, trainer, model
     gc.collect()
     torch.cuda.empty_cache()
     return
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     main()
