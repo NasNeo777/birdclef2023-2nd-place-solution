@@ -196,7 +196,7 @@ def main():
     )
 
     logger = WandbLogger(
-        project=f'BirdClef-SoftLoss-LLRD-{cfg.dataset_version}',
+        project=f'BirdClef-SoftLoss-LLRD_all_model-{cfg.dataset_version}',
         name=f'{model_name}_{stage}',
         settings=wandb.Settings(quiet=True, console="off"),
     )
