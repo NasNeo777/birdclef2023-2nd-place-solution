@@ -57,7 +57,7 @@ MODEL_SPECS = [
         use_delta=True,
         crop=None,
         output_type="prob",
-        ensemble_weight=0.25,
+        ensemble_weight=0.22,
         tta_delta=3,
     ),
     ModelSpec(
@@ -68,7 +68,7 @@ MODEL_SPECS = [
         use_delta=False,
         crop=None,
         output_type="prob",
-        ensemble_weight=0.10,
+        ensemble_weight=0.20,
         tta_delta=2,
     ),
     ModelSpec(
@@ -79,7 +79,7 @@ MODEL_SPECS = [
         use_delta=True,
         crop=None,
         output_type="prob",
-        ensemble_weight=0.21,
+        ensemble_weight=0.05,
         tta_delta=3,
     ),
     ModelSpec(
@@ -90,7 +90,7 @@ MODEL_SPECS = [
         use_delta=True,
         crop=(128, 384),
         output_type="logit",
-        ensemble_weight=0.10,
+        ensemble_weight=0.27,
     ),
     ModelSpec(
         name="cnn_b3ns",
@@ -100,7 +100,7 @@ MODEL_SPECS = [
         use_delta=True,
         crop=(150, 450),
         output_type="logit",
-        ensemble_weight=0.15,
+        ensemble_weight=0.00,
     ),
     ModelSpec(
         name="cnn_v2s",
@@ -110,7 +110,7 @@ MODEL_SPECS = [
         use_delta=True,
         crop=(250, 750),
         output_type="logit",
-        ensemble_weight=0.15,
+        ensemble_weight=0.16,
     ),
     ModelSpec(
         name="cnn_b0ns",
@@ -120,7 +120,7 @@ MODEL_SPECS = [
         use_delta=False,
         crop=(128, 384),
         output_type="logit",
-        ensemble_weight=0.04,
+        ensemble_weight=0.10,
     ),
 ]
 
@@ -153,6 +153,32 @@ def selected_model_specs() -> list[ModelSpec]:
             for spec, weight in zip(chosen, weights)
         ]
     return chosen
+
+
+def model_artifact_size_mb(model_spec: ModelSpec) -> float | None:
+    model_dir = WEIGHTS_ROOT / model_spec.xml_dir
+    if not model_dir.exists():
+        return None
+    total_bytes = sum(path.stat().st_size for path in model_dir.rglob("*") if path.is_file())
+    return total_bytes / (1024 * 1024)
+
+
+def print_model_specs(model_specs: list[ModelSpec]) -> None:
+    print("model summary:", flush=True)
+    print(f"{'model':<18} {'kind':<4} {'weight':>6} {'size_mb':>9}  path", flush=True)
+    total_weight = 0.0
+    total_size = 0.0
+    for spec in model_specs:
+        size_mb = model_artifact_size_mb(spec)
+        size_text = "missing" if size_mb is None else f"{size_mb:9.1f}"
+        if size_mb is not None:
+            total_size += size_mb
+        total_weight += spec.ensemble_weight
+        print(
+            f"{spec.name:<18} {spec.kind:<4} {spec.ensemble_weight:6.2f} {size_text}  {spec.xml_dir}",
+            flush=True,
+        )
+    print(f"total_weight={total_weight:.2f} total_size_mb={total_size:.1f}", flush=True)
 
 
 def list_audio_files(audio_dir: Path) -> list[Path]:
@@ -463,6 +489,7 @@ def run_submission() -> None:
     selected_specs = selected_model_specs()
     print("models:", [spec.name for spec in selected_specs], flush=True)
     print("weights_root:", WEIGHTS_ROOT, flush=True)
+    print_model_specs(selected_specs)
     core = ov.Core()
     runners = [build_runner(spec, class_names, core) for spec in selected_specs]
 
