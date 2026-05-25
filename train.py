@@ -201,17 +201,15 @@ def main():
         settings=wandb.Settings(quiet=True, console="off"),
     )
     checkpoint_callback = ModelCheckpoint(
-        # monitor='val_loss',
-        monitor=None,
+        monitor='val_roc_auc',
         dirpath=cfg.output_path[stage],
-        save_top_k=0,
+        filename='best',
+        save_top_k=1,
         save_last=True,
         save_weights_only=True,
-        # filename= './ckpt_epoch_{epoch}_val_loss_{val_loss:.2f}',
-        # filename ='./ckpt_{epoch}_{val_loss}',
         verbose=True,
         every_n_epochs=1,
-        mode='min'
+        mode='max',
     )
     callbacks_to_use = [checkpoint_callback]
     model = load_model(cfg, stage)

@@ -86,6 +86,11 @@ def export_model(model_name: str, overwrite: bool, export_batch_size: int) -> No
     cfg = prepare_cfg(cfg, stage)
 
     checkpoint = Path(cfg.final_model_path)
+    best_checkpoint = checkpoint.with_name("best.ckpt")
+    if best_checkpoint.exists():
+        checkpoint = best_checkpoint
+        cfg.final_model_path = str(best_checkpoint)
+        print(f"[best] {model_name}: exporting {best_checkpoint}")
     if not checkpoint.exists():
         raise FileNotFoundError(f"{model_name}: missing checkpoint {checkpoint}")
 
