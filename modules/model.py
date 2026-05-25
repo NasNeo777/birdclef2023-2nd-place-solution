@@ -542,12 +542,70 @@ class BirdClefModelBase(pl.LightningModule):
             if (self.global_step + 1) % 10 == 0:
                 self.ema.update(self)
 
-    def configure_optimizers(self):
-        model_optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters()),
-            lr=self.lr,
-            weight_decay=self.cfg.weight_decay,
+    def _llrd_backbone_layers(self):
+        backbone = getattr(self, "backbone", None) or getattr(self, "encoder", None)
+        if backbone is None:
+            return []
+
+        layers = []
+        for name, module in backbone.named_children():
+            if name == "blocks" or (isinstance(module, nn.Sequential) and len(module) > 2):
+                layers.extend(list(module.children()))
+            else:
+                layers.append(module)
+        return layers or [backbone]
+
+    def _llrd_param_groups(self):
+        decay = float(getattr(self.cfg, "llrd_decay", 0.8))
+        head_lr_mult = float(getattr(self.cfg, "llrd_head_lr_mult", 1.0))
+        if not (0.0 < decay <= 1.0):
+            raise ValueError(f"llrd_decay must be in (0, 1], got {decay}")
+        if head_lr_mult <= 0.0:
+            raise ValueError(f"llrd_head_lr_mult must be > 0, got {head_lr_mult}")
+
+        groups = []
+        assigned = set()
+        layers = self._llrd_backbone_layers()
+        num_layers = len(layers)
+
+        for idx, layer in enumerate(layers):
+            params = []
+            for param in layer.parameters():
+                if param.requires_grad and id(param) not in assigned:
+                    params.append(param)
+                    assigned.add(id(param))
+            if params:
+                layer_lr = self.lr * (decay ** (num_layers - idx - 1))
+                groups.append({"params": params, "lr": layer_lr, "name": f"llrd_layer_{idx}"})
+
+        head_params = []
+        for param in self.parameters():
+            if param.requires_grad and id(param) not in assigned:
+                head_params.append(param)
+                assigned.add(id(param))
+        if head_params:
+            groups.append({"params": head_params, "lr": self.lr * head_lr_mult, "name": "llrd_head"})
+
+        if not groups:
+            groups = [{"params": [p for p in self.parameters() if p.requires_grad], "lr": self.lr, "name": "default"}]
+
+        summary = ", ".join(
+            f"{group['name']}:lr={group['lr']:.2e},n={sum(p.numel() for p in group['params'])}"
+            for group in groups
         )
+        print(f"LLRD enabled decay={decay} head_lr_mult={head_lr_mult}: {summary}")
+        return groups
+
+    def configure_optimizers(self):
+        if getattr(self.cfg, "use_llrd", False):
+            params = self._llrd_param_groups()
+            model_optimizer = torch.optim.Adam(params, weight_decay=self.cfg.weight_decay)
+        else:
+            model_optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, self.parameters()),
+                lr=self.lr,
+                weight_decay=self.cfg.weight_decay,
+            )
         interval = "epoch"
 
         lr_scheduler = CosineAnnealingWarmRestarts(
