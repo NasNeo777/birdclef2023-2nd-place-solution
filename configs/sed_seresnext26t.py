@@ -28,6 +28,8 @@ cfg.secondary_label_weight = 0.5
 
 cfg.batch_size = 48
 cfg.PRECISION = 32
+cfg.use_llrd = True
+cfg.llrd_decay = 0.8
 cfg.seed = {
     "pretrain_ce": 19940215,
     "pretrain_bce": 19000215,

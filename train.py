@@ -75,6 +75,30 @@ def precision_env_override(prefix, model_name, stage, default):
     return precision
 
 
+def bool_env_override(prefix, model_name, stage, default):
+    key, value = env_override(prefix, model_name, stage)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        result = True
+    elif value in {"0", "false", "no", "off"}:
+        result = False
+    else:
+        raise ValueError(f"{key} must be a boolean-like value, got {value!r}")
+    print(f"{key} override: {default} -> {result}")
+    return result
+
+
+def float_env_override(prefix, model_name, stage, default):
+    key, value = env_override(prefix, model_name, stage)
+    if value is None:
+        return default
+    result = float(value)
+    print(f"{key} override: {default} -> {result}")
+    return result
+
+
 def resolve_repo_path(repo_root, path_str):
     path = Path(path_str)
     if path.is_absolute():
@@ -100,6 +124,14 @@ def main():
     cfg = importlib.import_module(f'configs.{model_name}').basic_cfg
     cfg.batch_size = int_env_override("BIRDCLEF_BATCH_SIZE", model_name, stage, int(cfg.batch_size))
     cfg.PRECISION = precision_env_override("BIRDCLEF_PRECISION", model_name, stage, cfg.PRECISION)
+    cfg.use_llrd = bool_env_override("BIRDCLEF_USE_LLRD", model_name, stage, bool(getattr(cfg, "use_llrd", False)))
+    cfg.llrd_decay = float_env_override("BIRDCLEF_LLRD_DECAY", model_name, stage, float(getattr(cfg, "llrd_decay", 0.8)))
+    cfg.llrd_head_lr_mult = float_env_override(
+        "BIRDCLEF_LLRD_HEAD_LR_MULT",
+        model_name,
+        stage,
+        float(getattr(cfg, "llrd_head_lr_mult", 1.0)),
+    )
     cfg = prepare_cfg(cfg,stage)
     accumulate_grad_batches = int_env_override(
         "BIRDCLEF_ACCUMULATE_GRAD_BATCHES",
