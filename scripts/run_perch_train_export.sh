@@ -129,7 +129,8 @@ ensure_perch_env() {
     return
   fi
 
-  if conda run -n "$PERCH_ENV" python -c '
+  local dep_check
+  dep_check=$(conda run -n "$PERCH_ENV" python -c '
 from importlib import metadata
 from packaging.version import Version
 
@@ -155,12 +156,14 @@ for pkg, (min_v, max_v) in required.items():
         missing.append(f"{pkg}<{max_v}")
 if missing:
     print("missing_or_incompatible=" + ",".join(missing))
-    raise SystemExit(1)
-print("Perch dependencies already satisfy requirements")
-'
-  then
+else:
+    print("ok")
+')
+  if [[ "$dep_check" == *"ok"* ]]; then
+    echo "[perch-env] dependencies already satisfy requirements"
     return
   fi
+  echo "[perch-env] $dep_check"
 
   echo "[perch-env] installing TensorFlow Perch dependencies with retries"
   conda run -n "$PERCH_ENV" python -m pip install --no-input \
