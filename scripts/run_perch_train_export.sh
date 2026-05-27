@@ -21,8 +21,9 @@ SKIP_EXPORT="${SKIP_EXPORT:-0}"
 SKIP_PACKAGE="${SKIP_PACKAGE:-0}"
 CREATE_PERCH_ENV="${CREATE_PERCH_ENV:-1}"
 SKIP_PERCH_INSTALL="${SKIP_PERCH_INSTALL:-0}"
-PERCH_NUM_PROCESSES="${PERCH_NUM_PROCESSES:-1}"
-PERCH_CPU_MASK="${PERCH_CPU_MASK:-}"
+PERCH_NUM_PROCESSES="${PERCH_NUM_PROCESSES:-4}"
+PERCH_CPU_MASK="${PERCH_CPU_MASK:-0-7}"
+PERCH_THREADS_PER_PROC="${PERCH_THREADS_PER_PROC:-2}"
 PERCH_OVERWRITE="${PERCH_OVERWRITE:-0}"
 PIP_RETRIES="${PIP_RETRIES:-10}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-120}"
@@ -54,7 +55,7 @@ Options:
   --skip-train              Skip training
   --skip-export             Skip OpenVINO export, package existing files
   --skip-package            Skip packaging entirely
-  --perch-num-processes N   Split extraction into N parallel CPU processes (default: 1)
+  --perch-num-processes N   Split extraction into N parallel CPU processes (default: 4)
   --perch-overwrite         Regenerate existing Perch .npy files
   --no-create-perch-env     Do not create the Perch TensorFlow conda env
   --skip-perch-install      Do not install/update Perch env dependencies
@@ -63,8 +64,9 @@ Options:
   -h, --help                Show help
 
 Useful environment overrides:
-  PERCH_NUM_PROCESSES=4          Split extraction across N parallel CPU processes
-  PERCH_THREADS_PER_PROC=2       Override per-process TF thread count (useful on hybrid P/E-core CPUs)
+  PERCH_NUM_PROCESSES=4          Split extraction across N parallel CPU processes (default: 4)
+  PERCH_CPU_MASK=0-7             CPU affinity mask for Perch processes (default: 0-7, P-cores only)
+  PERCH_THREADS_PER_PROC=2       Override per-process TF thread count (default: 2)
   BIRDSOUND_PYTHON=/path/to/train/python
   PERCH_KAGGLE_HANDLE=google/bird-vocalization-classifier/tensorFlow2/perch_v2_cpu
   PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
