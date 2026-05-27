@@ -333,11 +333,12 @@ def main() -> None:
     print(
         f"[perch-extract] jobs={total} output_dir={output_dir} "
         f"batch_size={args.batch_size} overwrite={args.overwrite}",
+        file=sys.stderr,
         flush=True,
     )
-    print("[perch-extract] loading model/backend...", flush=True)
+    print("[perch-extract] loading model/backend...", file=sys.stderr, flush=True)
     backend, model = resolve_backend(args)
-    print(f"[perch-extract] backend ready: {backend}", flush=True)
+    print(f"[perch-extract] backend ready: {backend}", file=sys.stderr, flush=True)
 
     try:
         from tqdm.auto import tqdm
@@ -400,6 +401,7 @@ def main() -> None:
     print(
         f"[perch-extract] wrote {len(rows)} Perch V2 embeddings to {output_dir} "
         f"(extracted={extracted}, skipped={skipped})",
+        file=sys.stderr,
         flush=True,
     )
 
