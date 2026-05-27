@@ -363,10 +363,16 @@ PY
     fi
 
     echo "[perch-extract] launching shard $shard_i: ${cmd[*]}"
-    local taskset_cmd=()
+
+    TF_NUM_INTRAOP_THREADS="$threads_per_proc" \
+      TF_NUM_INTEROP_THREADS="$threads_per_proc" \
+      OMP_NUM_THREADS="$threads_per_proc" \
+      run_perch_python "${cmd[@]}" > "$shard_log" 2>&1 &
+    local child_pid=$!
+    pids+=($child_pid)
+
     if [[ -n "${PERCH_CPU_MASK:-}" ]]; then
-      # Split the CPU mask range evenly among shards.
-      # e.g. PERCH_CPU_MASK=0-15 with 4 shards → shard 0 gets cores 0-3, shard 1 gets 4-7, etc.
+      # Split the CPU mask range evenly among shards and pin via PID.
       local mask_start mask_end mask_count
       IFS=- read -r mask_start mask_end <<< "$PERCH_CPU_MASK"
       mask_start=${mask_start:-0}
@@ -377,15 +383,9 @@ PY
       local shard_start=$((mask_start + shard_i * per_shard))
       local shard_end=$((shard_start + per_shard - 1))
       [[ "$shard_end" -gt "$mask_end" ]] && shard_end="$mask_end"
-      taskset_cmd=(taskset -c "${shard_start}-${shard_end}")
-      echo "[perch-extract]   shard $shard_i cpu affinity: ${shard_start}-${shard_end}"
+      taskset -cp "${shard_start}-${shard_end}" "$child_pid" 2>/dev/null || true
+      echo "[perch-extract]   shard $shard_i (pid $child_pid) cpu affinity: ${shard_start}-${shard_end}"
     fi
-    TF_NUM_INTRAOP_THREADS="$threads_per_proc" \
-      TF_NUM_INTEROP_THREADS="$threads_per_proc" \
-      OMP_NUM_THREADS="$threads_per_proc" \
-      "${taskset_cmd[@]}" \
-      run_perch_python "${cmd[@]}" > "$shard_log" 2>&1 &
-    pids+=($!)
   done
 
   # Background progress monitor — counts .npy files every 30s
