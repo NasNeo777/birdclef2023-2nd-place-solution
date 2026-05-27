@@ -22,6 +22,7 @@ SKIP_PACKAGE="${SKIP_PACKAGE:-0}"
 CREATE_PERCH_ENV="${CREATE_PERCH_ENV:-1}"
 SKIP_PERCH_INSTALL="${SKIP_PERCH_INSTALL:-0}"
 PERCH_NUM_PROCESSES="${PERCH_NUM_PROCESSES:-1}"
+PERCH_CPU_MASK="${PERCH_CPU_MASK:-}"
 PERCH_OVERWRITE="${PERCH_OVERWRITE:-0}"
 PIP_RETRIES="${PIP_RETRIES:-10}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-120}"
@@ -333,6 +334,13 @@ PY
 
   local pids=()
   local shard_i
+
+  # Count total jobs and pre-existing .npy files for progress tracking
+  local total_jobs
+  total_jobs=$(tail -n +2 "$PERCH_MANIFEST" 2>/dev/null | wc -l)
+  local features_dir="$PERCH_OUTPUT_DIR/features"
+  mkdir -p "$features_dir"
+
   for ((shard_i = 0; shard_i < num_procs; shard_i++)); do
     local shard_manifest="$shard_dir/shard_${shard_i}.csv"
     local shard_log="$log_dir/shard_${shard_i}.log"
@@ -353,12 +361,56 @@ PY
     fi
 
     echo "[perch-extract] launching shard $shard_i: ${cmd[*]}"
+    local taskset_cmd=()
+    if [[ -n "${PERCH_CPU_MASK:-}" ]]; then
+      # Split the CPU mask range evenly among shards.
+      # e.g. PERCH_CPU_MASK=0-15 with 4 shards → shard 0 gets cores 0-3, shard 1 gets 4-7, etc.
+      local mask_start mask_end mask_count
+      IFS=- read -r mask_start mask_end <<< "$PERCH_CPU_MASK"
+      mask_start=${mask_start:-0}
+      mask_end=${mask_end:-$mask_start}
+      mask_count=$((mask_end - mask_start + 1))
+      local per_shard=$((mask_count / num_procs))
+      [[ "$per_shard" -lt 1 ]] && per_shard=1
+      local shard_start=$((mask_start + shard_i * per_shard))
+      local shard_end=$((shard_start + per_shard - 1))
+      [[ "$shard_end" -gt "$mask_end" ]] && shard_end="$mask_end"
+      taskset_cmd=(taskset -c "${shard_start}-${shard_end}")
+      echo "[perch-extract]   shard $shard_i cpu affinity: ${shard_start}-${shard_end}"
+    fi
     TF_NUM_INTRAOP_THREADS="$threads_per_proc" \
       TF_NUM_INTEROP_THREADS="$threads_per_proc" \
       OMP_NUM_THREADS="$threads_per_proc" \
+      "${taskset_cmd[@]}" \
       run_perch_python "${cmd[@]}" > "$shard_log" 2>&1 &
     pids+=($!)
   done
+
+  # Background progress monitor — counts .npy files every 30s
+  local start_ts=$SECONDS
+  local monitor_pid
+  (
+    while true; do
+      sleep 30
+      local alive=0
+      for _pid in "${pids[@]}"; do
+        kill -0 "$_pid" 2>/dev/null && alive=$((alive + 1))
+      done
+      [[ "$alive" -eq 0 ]] && break
+      local done_npy
+      done_npy=$(ls -f "$features_dir" 2>/dev/null | wc -l)
+      done_npy=$((done_npy - 2))  # subtract . and ..
+      local pct=$(( done_npy * 100 / total_jobs ))
+      local elapsed_m=$(( (SECONDS - start_ts) / 60 ))
+      local rate=0
+      if [[ "$elapsed_m" -gt 0 ]]; then
+        rate=$(( done_npy / elapsed_m ))
+      fi
+      printf '[perch-extract] %d/%d (%d%%) | %dm elapsed | ~%d job/m | %d/%d alive\n' \
+        "$done_npy" "$total_jobs" "$pct" "$elapsed_m" "$rate" "$alive" "$num_procs"
+    done
+  ) &
+  monitor_pid=$!
 
   # Wait for all shard processes and check exit codes
   local failed=0
@@ -371,6 +423,15 @@ PY
       echo "[perch-extract] shard $i (pid $pid) finished OK"
     fi
   done
+
+  # Stop monitor and print final count
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  local final_npy
+  final_npy=$(ls -f "$features_dir" 2>/dev/null | wc -l)
+  final_npy=$((final_npy - 2))
+  printf '[perch-extract] done: %d/%d .npy files in %dm\n' \
+    "$final_npy" "$total_jobs" "$(( (SECONDS - start_ts) / 60 ))"
 
   if [[ "$failed" -eq 1 ]]; then
     echo "[perch-extract] one or more shard processes failed — aborting merge" >&2
