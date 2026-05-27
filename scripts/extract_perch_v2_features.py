@@ -329,16 +329,41 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "features").mkdir(parents=True, exist_ok=True)
 
+    total = len(jobs)
+    print(
+        f"[perch-extract] jobs={total} output_dir={output_dir} "
+        f"batch_size={args.batch_size} overwrite={args.overwrite}",
+        flush=True,
+    )
+    print("[perch-extract] loading model/backend...", flush=True)
     backend, model = resolve_backend(args)
+    print(f"[perch-extract] backend ready: {backend}", flush=True)
+
+    try:
+        from tqdm.auto import tqdm
+    except ImportError as exc:
+        raise SystemExit("tqdm is required for Perch extraction progress. Install tqdm in the Perch env.") from exc
 
     index_path = output_dir / "index.csv"
     rows = []
     pending_audio = []
     pending_meta = []
-    done = 0
+    extracted = 0
+    skipped = 0
+
+    progress = tqdm(total=total, desc="perch-extract", unit="job", dynamic_ncols=True)
+
+    def update_progress() -> None:
+        progress.set_postfix(
+            extracted=extracted,
+            skipped=skipped,
+            pending=len(pending_audio),
+            refresh=False,
+        )
+        progress.update(1)
 
     def flush():
-        nonlocal done, pending_audio, pending_meta
+        nonlocal extracted, pending_audio, pending_meta
         if not pending_audio:
             return
         embeddings = extract_embeddings(backend, model, pending_audio)
@@ -346,28 +371,37 @@ def main() -> None:
             rel_path = path.relative_to(output_dir)
             np.save(path, embedding)
             rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(rel_path)})
-            done += 1
-            if done % 500 == 0:
-                print(f"extracted {done}/{len(jobs)}")
+            extracted += 1
         pending_audio = []
         pending_meta = []
 
-    for filename, audio_path, end_sec in jobs:
-        path = output_path(output_dir, filename, end_sec)
-        if path.exists() and not args.overwrite:
-            rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(path.relative_to(output_dir))})
-            continue
-        pending_audio.append(load_window(audio_path, end_sec, PERCH_SAMPLE_RATE))
-        pending_meta.append((filename, end_sec, path))
-        if len(pending_audio) >= args.batch_size:
-            flush()
-    flush()
+    try:
+        for filename, audio_path, end_sec in jobs:
+            path = output_path(output_dir, filename, end_sec)
+            if path.exists() and not args.overwrite:
+                rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(path.relative_to(output_dir))})
+                skipped += 1
+                update_progress()
+                continue
+            pending_audio.append(load_window(audio_path, end_sec, PERCH_SAMPLE_RATE))
+            pending_meta.append((filename, end_sec, path))
+            if len(pending_audio) >= args.batch_size:
+                flush()
+            update_progress()
+        flush()
+        progress.set_postfix(extracted=extracted, skipped=skipped, pending=0, refresh=True)
+    finally:
+        progress.close()
 
     with index_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["filename", "end_sec", "path"])
         writer.writeheader()
         writer.writerows(rows)
-    print(f"wrote {len(rows)} Perch V2 embeddings to {output_dir}")
+    print(
+        f"[perch-extract] wrote {len(rows)} Perch V2 embeddings to {output_dir} "
+        f"(extracted={extracted}, skipped={skipped})",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
