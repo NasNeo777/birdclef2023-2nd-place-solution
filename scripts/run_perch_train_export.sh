@@ -102,9 +102,9 @@ MODEL_ARGS=("${MODELS[@]}")
 
 run_perch_python() {
   if [[ -n "$PERCH_PYTHON" ]]; then
-    "$PERCH_PYTHON" "$@"
+    PYTHONUNBUFFERED=1 "$PERCH_PYTHON" "$@"
   else
-    conda run -n "$PERCH_ENV" python "$@"
+    PYTHONUNBUFFERED=1 conda run --no-capture-output -n "$PERCH_ENV" python "$@"
   fi
 }
 
