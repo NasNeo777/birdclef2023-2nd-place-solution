@@ -139,6 +139,8 @@ required = {
     "tensorflow": ("2.20.0", "2.21.0"),
     "numpy": ("1.26.0", "2.3.0"),
     "librosa": ("0.10.0", "0.12.0"),
+    "pandas": ("2.2.0", "2.4.0"),
+    "scikit-learn": ("1.5.0", "1.8.0"),
     "soundfile": ("0.0.0", None),
     "scipy": ("0.0.0", None),
     "soxr": ("0.0.0", None),
@@ -175,6 +177,8 @@ else:
     kagglehub \
     'tensorflow==2.20.*' \
     'numpy>=1.26,<2.3' \
+    'pandas>=2.2,<2.4' \
+    'scikit-learn>=1.5,<1.8' \
     'librosa>=0.10,<0.12' \
     soundfile \
     scipy \
