@@ -19,7 +19,11 @@ SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_EXPORT="${SKIP_EXPORT:-0}"
 SKIP_PACKAGE="${SKIP_PACKAGE:-0}"
 CREATE_PERCH_ENV="${CREATE_PERCH_ENV:-1}"
+SKIP_PERCH_INSTALL="${SKIP_PERCH_INSTALL:-0}"
 PERCH_OVERWRITE="${PERCH_OVERWRITE:-0}"
+PIP_RETRIES="${PIP_RETRIES:-10}"
+PIP_TIMEOUT="${PIP_TIMEOUT:-120}"
+PIP_INDEX_URL_OPT="${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL}"
 TRAIN_EXTRA_ARGS="${TRAIN_EXTRA_ARGS:-}"
 PACKAGE_EXTRA_ARGS="${PACKAGE_EXTRA_ARGS:-}"
 EXPORT_BATCH_SIZE="${EXPORT_BATCH_SIZE:-12}"
@@ -46,7 +50,8 @@ Options:
   --skip-export             Skip OpenVINO export, package existing files
   --skip-package            Skip packaging entirely
   --perch-overwrite         Regenerate existing Perch .npy files
-  --no-create-perch-env     Do not create/install the Perch TensorFlow conda env
+  --no-create-perch-env     Do not create the Perch TensorFlow conda env
+  --skip-perch-install      Do not install/update Perch env dependencies
   --train-extra ARGS        Extra quoted args passed to scripts/run_all_train_jobs.sh
   --package-extra ARGS      Extra quoted args passed to package_kaggle_openvino_2026.py
   -h, --help                Show help
@@ -54,6 +59,9 @@ Options:
 Useful environment overrides:
   BIRDSOUND_PYTHON=/path/to/train/python
   PERCH_KAGGLE_HANDLE=google/bird-vocalization-classifier/tensorFlow2/perch_v2_cpu
+  PIP_INDEX_URL=https://pypi.org/simple
+  PIP_RETRIES=10
+  PIP_TIMEOUT=120
   EXPORT_BATCH_SIZE=12
 
 Example:
@@ -75,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --skip-package) SKIP_PACKAGE=1; shift ;;
     --perch-overwrite) PERCH_OVERWRITE=1; shift ;;
     --no-create-perch-env) CREATE_PERCH_ENV=0; shift ;;
+    --skip-perch-install) SKIP_PERCH_INSTALL=1; shift ;;
     --train-extra) TRAIN_EXTRA_ARGS="$2"; shift 2 ;;
     --package-extra) PACKAGE_EXTRA_ARGS="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -115,8 +124,50 @@ ensure_perch_env() {
     conda create -n "$PERCH_ENV" python=3.10 -y
   fi
 
-  echo "[perch-env] installing/updating TensorFlow Perch dependencies"
-  conda run -n "$PERCH_ENV" python -m pip install -U \
+  if [[ "$SKIP_PERCH_INSTALL" == "1" ]]; then
+    echo "[perch-env] dependency install skipped"
+    return
+  fi
+
+  if conda run -n "$PERCH_ENV" python - <<'PY'
+from importlib import metadata
+from packaging.version import Version
+
+required = {
+    'tensorflow': ('2.20.0', '2.21.0'),
+    'numpy': ('1.26.0', '2.3.0'),
+    'librosa': ('0.10.0', '0.12.0'),
+    'soundfile': ('0.0.0', None),
+    'scipy': ('0.0.0', None),
+    'soxr': ('0.0.0', None),
+    'kagglehub': ('0.0.0', None),
+}
+missing = []
+for pkg, (min_v, max_v) in required.items():
+    try:
+        version = Version(metadata.version(pkg))
+    except metadata.PackageNotFoundError:
+        missing.append(pkg)
+        continue
+    if min_v and version < Version(min_v):
+        missing.append(f'{pkg}>={min_v}')
+    if max_v and version >= Version(max_v):
+        missing.append(f'{pkg}<{max_v}')
+if missing:
+    print('missing_or_incompatible=' + ','.join(missing))
+    raise SystemExit(1)
+print('Perch dependencies already satisfy requirements')
+PY
+  then
+    return
+  fi
+
+  echo "[perch-env] installing TensorFlow Perch dependencies with retries"
+  conda run -n "$PERCH_ENV" python -m pip install \
+    --retries "$PIP_RETRIES" \
+    --timeout "$PIP_TIMEOUT" \
+    --resume-retries "$PIP_RETRIES" \
+    $PIP_INDEX_URL_OPT \
     kagglehub \
     'tensorflow==2.20.*' \
     'numpy>=1.26,<2.3' \
