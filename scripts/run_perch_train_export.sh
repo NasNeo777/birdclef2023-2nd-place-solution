@@ -23,7 +23,8 @@ SKIP_PERCH_INSTALL="${SKIP_PERCH_INSTALL:-0}"
 PERCH_OVERWRITE="${PERCH_OVERWRITE:-0}"
 PIP_RETRIES="${PIP_RETRIES:-10}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-120}"
-PIP_INDEX_URL_OPT="${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL}"
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+PIP_INDEX_URL_OPT="--index-url $PIP_INDEX_URL"
 TRAIN_EXTRA_ARGS="${TRAIN_EXTRA_ARGS:-}"
 PACKAGE_EXTRA_ARGS="${PACKAGE_EXTRA_ARGS:-}"
 EXPORT_BATCH_SIZE="${EXPORT_BATCH_SIZE:-12}"
@@ -59,7 +60,7 @@ Options:
 Useful environment overrides:
   BIRDSOUND_PYTHON=/path/to/train/python
   PERCH_KAGGLE_HANDLE=google/bird-vocalization-classifier/tensorFlow2/perch_v2_cpu
-  PIP_INDEX_URL=https://pypi.org/simple
+  PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
   PIP_RETRIES=10
   PIP_TIMEOUT=120
   EXPORT_BATCH_SIZE=12
