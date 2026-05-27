@@ -5,6 +5,7 @@ import argparse
 import csv
 import importlib
 import math
+import os
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -38,15 +39,62 @@ PERCH_WINDOW_SECONDS = 5
 PERCH_NUM_SAMPLES = PERCH_SAMPLE_RATE * PERCH_WINDOW_SECONDS
 
 
+def find_saved_model_dir(path: Path) -> Path | None:
+    if (path / "saved_model.pb").is_file():
+        return path
+    if not path.is_dir():
+        return None
+
+    candidates = [child for child in path.iterdir() if child.is_dir() and (child / "saved_model.pb").is_file()]
+    if not candidates:
+        return None
+
+    def version_key(candidate: Path) -> tuple[int, str]:
+        return (int(candidate.name), candidate.name) if candidate.name.isdigit() else (-1, candidate.name)
+
+    return sorted(candidates, key=version_key)[-1]
+
+
+def cached_kaggle_model_dir(handle: str) -> Path | None:
+    handle_parts = [part for part in handle.split("/") if part]
+    cache_roots = []
+    if os.environ.get("KAGGLEHUB_CACHE"):
+        cache_roots.append(Path(os.environ["KAGGLEHUB_CACHE"]))
+    cache_roots.append(Path.home() / ".cache" / "kagglehub")
+
+    for root in cache_roots:
+        model_root = root / "models" / Path(*handle_parts)
+        saved_model_dir = find_saved_model_dir(model_root)
+        if saved_model_dir is not None:
+            return saved_model_dir
+    return None
+
+
 def download_kaggle_model(handle: str) -> Path:
+    cached_dir = cached_kaggle_model_dir(handle)
+    if cached_dir is not None:
+        return cached_dir
+
     try:
         import kagglehub
     except ImportError as exc:
         raise SystemExit(
-            "kagglehub is required when --model-dir and --onnx-path are not provided. "
-            "Install kagglehub, or pass --model-dir pointing to the Kaggle Perch V2 CPU model."
+            "kagglehub is required when --model-dir/--onnx-path are not provided and the model is not in "
+            "~/.cache/kagglehub. Install kagglehub, or pass --model-dir pointing to the Kaggle Perch V2 CPU "
+            "SavedModel directory."
         ) from exc
-    return Path(kagglehub.model_download(handle))
+    downloaded_dir = Path(kagglehub.model_download(handle))
+    saved_model_dir = find_saved_model_dir(downloaded_dir)
+    if saved_model_dir is None:
+        raise SystemExit(f"No TensorFlow SavedModel found under downloaded Kaggle model directory: {downloaded_dir}")
+    return saved_model_dir
+
+
+def resolve_model_dir(model_dir: Path) -> Path:
+    saved_model_dir = find_saved_model_dir(model_dir)
+    if saved_model_dir is None:
+        raise SystemExit(f"No TensorFlow SavedModel found under --model-dir: {model_dir}")
+    return saved_model_dir
 
 
 def package_version(name: str) -> tuple[int, ...] | None:
@@ -125,7 +173,7 @@ def resolve_backend(args):
     if args.onnx_path is not None:
         return "onnx", load_onnx_session(args.onnx_path, args.providers)
 
-    model_dir = args.model_dir or download_kaggle_model(args.kaggle_handle)
+    model_dir = resolve_model_dir(args.model_dir) if args.model_dir else download_kaggle_model(args.kaggle_handle)
     return "tensorflow", load_tf_model(model_dir, args.skip_tf_runtime_check)
 
 
