@@ -332,6 +332,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audio-workers", type=int, default=4, help="Parallel workers for per-window audio loading/resampling when --window-loading-mode window is used. Use 0 to disable.")
     parser.add_argument("--window-loading-mode", choices=["file", "window"], default="file", help="Load each contiguous audio file once and slice windows, or load each window separately.")
     parser.add_argument("--include-valid", action="store_true")
+    parser.add_argument("--index-name", default="index.csv", help="Filename for the output index CSV inside --output-dir (default: index.csv).")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--provider", action="append", dest="providers", help="ONNX Runtime provider. Can be passed more than once.")
     parser.add_argument("--skip-tf-runtime-check", action="store_true", help="Skip TensorFlow dependency compatibility checks before import.")
@@ -376,7 +377,7 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit("tqdm is required for Perch extraction progress. Install tqdm in the Perch env.") from exc
 
-    index_path = output_dir / "index.csv"
+    index_path = output_dir / args.index_name
     rows = []
     pending_audio = []
     pending_meta = []

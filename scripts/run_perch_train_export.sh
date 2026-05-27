@@ -21,6 +21,7 @@ SKIP_EXPORT="${SKIP_EXPORT:-0}"
 SKIP_PACKAGE="${SKIP_PACKAGE:-0}"
 CREATE_PERCH_ENV="${CREATE_PERCH_ENV:-1}"
 SKIP_PERCH_INSTALL="${SKIP_PERCH_INSTALL:-0}"
+PERCH_NUM_PROCESSES="${PERCH_NUM_PROCESSES:-1}"
 PERCH_OVERWRITE="${PERCH_OVERWRITE:-0}"
 PIP_RETRIES="${PIP_RETRIES:-10}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-120}"
@@ -52,6 +53,7 @@ Options:
   --skip-train              Skip training
   --skip-export             Skip OpenVINO export, package existing files
   --skip-package            Skip packaging entirely
+  --perch-num-processes N   Split extraction into N parallel CPU processes (default: 1)
   --perch-overwrite         Regenerate existing Perch .npy files
   --no-create-perch-env     Do not create the Perch TensorFlow conda env
   --skip-perch-install      Do not install/update Perch env dependencies
@@ -60,6 +62,8 @@ Options:
   -h, --help                Show help
 
 Useful environment overrides:
+  PERCH_NUM_PROCESSES=4          Split extraction across N parallel CPU processes
+  PERCH_THREADS_PER_PROC=2       Override per-process TF thread count (useful on hybrid P/E-core CPUs)
   BIRDSOUND_PYTHON=/path/to/train/python
   PERCH_KAGGLE_HANDLE=google/bird-vocalization-classifier/tensorFlow2/perch_v2_cpu
   PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
@@ -68,7 +72,10 @@ Useful environment overrides:
   EXPORT_BATCH_SIZE=12
 
 Example:
+  # Single-process extraction (default)
   scripts/run_perch_train_export.sh --perch-batch-size 16
+  # Multi-process sharding: split extraction across 4 CPU processes
+  scripts/run_perch_train_export.sh --perch-num-processes 4 --perch-batch-size 16
 EOF
 }
 
@@ -85,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --skip-train) SKIP_TRAIN=1; shift ;;
     --skip-export) SKIP_EXPORT=1; shift ;;
     --skip-package) SKIP_PACKAGE=1; shift ;;
+    --perch-num-processes) PERCH_NUM_PROCESSES="$2"; shift 2 ;;
     --perch-overwrite) PERCH_OVERWRITE=1; shift ;;
     --no-create-perch-env) CREATE_PERCH_ENV=0; shift ;;
     --skip-perch-install) SKIP_PERCH_INSTALL=1; shift ;;
@@ -262,20 +270,142 @@ PY
 }
 
 extract_perch_features() {
-  local cmd=(scripts/extract_perch_v2_features.py
-    --manifest "$PERCH_MANIFEST"
-    --output-dir "$PERCH_OUTPUT_DIR"
-    --batch-size "$PERCH_BATCH_SIZE"
-    --audio-workers "$PERCH_AUDIO_WORKERS"
-    --kaggle-handle "$PERCH_KAGGLE_HANDLE")
-  if [[ -n "$PERCH_MODEL_DIR" ]]; then
-    cmd+=(--model-dir "$PERCH_MODEL_DIR")
+  local num_procs="${PERCH_NUM_PROCESSES:-1}"
+
+  if [[ "$num_procs" -le 1 ]]; then
+    local cmd=(scripts/extract_perch_v2_features.py
+      --manifest "$PERCH_MANIFEST"
+      --output-dir "$PERCH_OUTPUT_DIR"
+      --batch-size "$PERCH_BATCH_SIZE"
+      --audio-workers "$PERCH_AUDIO_WORKERS"
+      --kaggle-handle "$PERCH_KAGGLE_HANDLE")
+    if [[ -n "$PERCH_MODEL_DIR" ]]; then
+      cmd+=(--model-dir "$PERCH_MODEL_DIR")
+    fi
+    if [[ "$PERCH_OVERWRITE" == "1" ]]; then
+      cmd+=(--overwrite)
+    fi
+    echo "[perch-extract] ${cmd[*]}"
+    run_perch_python "${cmd[@]}"
+    return
   fi
-  if [[ "$PERCH_OVERWRITE" == "1" ]]; then
-    cmd+=(--overwrite)
+
+  # ── Multi-process sharding ──────────────────────────────────────────
+  local shard_dir="$PERCH_OUTPUT_DIR/.shards_$$"
+  local log_dir="$PERCH_OUTPUT_DIR/.logs_$$"
+  mkdir -p "$shard_dir" "$log_dir"
+
+  # Split manifest into N shards, preserving CSV header in each
+  echo "[perch-extract] splitting manifest into $num_procs shards..."
+  run_perch_python - "$PERCH_MANIFEST" "$num_procs" "$shard_dir" <<'PY'
+import csv, sys
+from pathlib import Path
+manifest = Path(sys.argv[1])
+num = int(sys.argv[2])
+shard_dir = Path(sys.argv[3])
+with manifest.open() as f:
+    rows = list(csv.DictReader(f))
+    fields = list(rows[0].keys()) if rows else ["filename", "path", "end_sec"]
+chunk = (len(rows) + num - 1) // num
+for i in range(num):
+    part = rows[i * chunk:(i + 1) * chunk]
+    out = shard_dir / f"shard_{i}.csv"
+    with out.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(part)
+    print(f"[perch-extract] shard {i}: {len(part)} jobs -> {out}", file=sys.stderr)
+PY
+
+  # Limit per-process threads to avoid CPU thrashing.
+  # On hybrid architectures (P-cores + E-cores), set PERCH_THREADS_PER_PROC
+  # manually because nproc counts E-cores which are slow for TF inference.
+  local threads_per_proc
+  if [[ -n "${PERCH_THREADS_PER_PROC:-}" ]]; then
+    threads_per_proc="$PERCH_THREADS_PER_PROC"
+  else
+    local total_cores
+    total_cores=$(nproc 2>/dev/null || echo 1)
+    threads_per_proc=$(( (total_cores + num_procs - 1) / num_procs ))
   fi
-  echo "[perch-extract] ${cmd[*]}"
-  run_perch_python "${cmd[@]}"
+  [[ "$threads_per_proc" -lt 1 ]] && threads_per_proc=1
+  echo "[perch-extract] num_procs=$num_procs threads_per_proc=$threads_per_proc"
+
+  local pids=()
+  local shard_i
+  for ((shard_i = 0; shard_i < num_procs; shard_i++)); do
+    local shard_manifest="$shard_dir/shard_${shard_i}.csv"
+    local shard_log="$log_dir/shard_${shard_i}.log"
+    local index_name="index_${shard_i}.csv"
+
+    local cmd=(scripts/extract_perch_v2_features.py
+      --manifest "$shard_manifest"
+      --output-dir "$PERCH_OUTPUT_DIR"
+      --index-name "$index_name"
+      --batch-size "$PERCH_BATCH_SIZE"
+      --audio-workers "$PERCH_AUDIO_WORKERS"
+      --kaggle-handle "$PERCH_KAGGLE_HANDLE")
+    if [[ -n "$PERCH_MODEL_DIR" ]]; then
+      cmd+=(--model-dir "$PERCH_MODEL_DIR")
+    fi
+    if [[ "$PERCH_OVERWRITE" == "1" ]]; then
+      cmd+=(--overwrite)
+    fi
+
+    echo "[perch-extract] launching shard $shard_i: ${cmd[*]}"
+    TF_NUM_INTRAOP_THREADS="$threads_per_proc" \
+      TF_NUM_INTEROP_THREADS="$threads_per_proc" \
+      OMP_NUM_THREADS="$threads_per_proc" \
+      run_perch_python "${cmd[@]}" > "$shard_log" 2>&1 &
+    pids+=($!)
+  done
+
+  # Wait for all shard processes and check exit codes
+  local failed=0
+  for i in "${!pids[@]}"; do
+    local pid="${pids[$i]}"
+    if ! wait "$pid"; then
+      echo "[perch-extract] shard $i (pid $pid) FAILED — see log: $log_dir/shard_${i}.log" >&2
+      failed=1
+    else
+      echo "[perch-extract] shard $i (pid $pid) finished OK"
+    fi
+  done
+
+  if [[ "$failed" -eq 1 ]]; then
+    echo "[perch-extract] one or more shard processes failed — aborting merge" >&2
+    echo "[perch-extract] shard logs preserved at: $log_dir" >&2
+    echo "[perch-extract] shard manifests preserved at: $shard_dir" >&2
+    return 1
+  fi
+
+  # Merge per-shard index files into the final index.csv
+  echo "[perch-extract] merging index files..."
+  run_perch_python - "$PERCH_OUTPUT_DIR" "$num_procs" <<'PY'
+import csv, sys
+from pathlib import Path
+output_dir = Path(sys.argv[1])
+num = int(sys.argv[2])
+all_rows = []
+for i in range(num):
+    p = output_dir / f"index_{i}.csv"
+    if not p.exists():
+        print(f"[perch-extract] WARNING: missing index file: {p}", file=sys.stderr)
+        continue
+    with p.open(newline="") as f:
+        all_rows.extend(list(csv.DictReader(f)))
+    p.unlink()
+merged = output_dir / "index.csv"
+with merged.open("w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=["filename", "end_sec", "path"])
+    w.writeheader()
+    w.writerows(all_rows)
+print(f"[perch-extract] merged {len(all_rows)} rows into {merged}", file=sys.stderr)
+PY
+
+  # Cleanup shard manifests and logs
+  rm -rf "$shard_dir"
+  echo "[perch-extract] cleaned up shard manifests, logs kept at: $log_dir"
 }
 
 run_training() {
