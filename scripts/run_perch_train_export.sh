@@ -9,6 +9,7 @@ BIRDSOUND_PYTHON="${BIRDSOUND_PYTHON:-$DEFAULT_BIRDSOUND_PYTHON}"
 PERCH_ENV="${PERCH_ENV:-PerchV2}"
 PERCH_PYTHON="${PERCH_PYTHON:-}"
 PERCH_BATCH_SIZE="${PERCH_BATCH_SIZE:-16}"
+PERCH_AUDIO_WORKERS="${PERCH_AUDIO_WORKERS:-8}"
 PERCH_OUTPUT_DIR="${PERCH_OUTPUT_DIR:-outputs/perch_features}"
 PERCH_MANIFEST="${PERCH_MANIFEST:-$PERCH_OUTPUT_DIR/all_jobs.csv}"
 PERCH_MODEL_DIR="${PERCH_MODEL_DIR:-}"
@@ -42,6 +43,7 @@ Runs the full local pipeline:
 Options:
   --models LIST             Comma-separated models. Default: sed_v2s,sed_seresnext26t,cnn_resnet34d
   --perch-batch-size N      Perch extraction batch size. Default: 16
+  --perch-audio-workers N   Parallel audio loading/resampling workers. Default: 8
   --perch-env NAME          Conda env for TensorFlow Perch extraction. Default: PerchV2
   --perch-python PATH       Use this Python for Perch extraction instead of conda run
   --perch-model-dir PATH    Local Kaggle perch_v2_cpu model directory
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --models) MODELS_CSV="$2"; shift 2 ;;
     --perch-batch-size) PERCH_BATCH_SIZE="$2"; shift 2 ;;
+    --perch-audio-workers) PERCH_AUDIO_WORKERS="$2"; shift 2 ;;
     --perch-env) PERCH_ENV="$2"; shift 2 ;;
     --perch-python) PERCH_PYTHON="$2"; shift 2 ;;
     --perch-model-dir) PERCH_MODEL_DIR="$2"; shift 2 ;;
@@ -263,6 +266,7 @@ extract_perch_features() {
     --manifest "$PERCH_MANIFEST"
     --output-dir "$PERCH_OUTPUT_DIR"
     --batch-size "$PERCH_BATCH_SIZE"
+    --audio-workers "$PERCH_AUDIO_WORKERS"
     --kaggle-handle "$PERCH_KAGGLE_HANDLE")
   if [[ -n "$PERCH_MODEL_DIR" ]]; then
     cmd+=(--model-dir "$PERCH_MODEL_DIR")

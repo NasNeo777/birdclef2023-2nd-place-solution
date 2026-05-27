@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import importlib
 import math
 import os
 import sys
+from itertools import groupby
 from importlib import metadata
 from pathlib import Path
 
@@ -243,6 +245,32 @@ def load_window(path: str, end_sec: float, sample_rate: int) -> np.ndarray:
     return audio.astype(np.float32)
 
 
+def load_audio_file(path: str, sample_rate: int) -> np.ndarray:
+    try:
+        import librosa as lb
+    except ImportError as exc:
+        raise SystemExit(
+            "librosa is required for Perch V2 audio loading in the extraction environment. "
+            "Run the pipeline without --skip-perch-install, or install librosa in the Perch env."
+        ) from exc
+
+    audio, orig_sr = lb.load(path, sr=None, mono=True)
+    if orig_sr != sample_rate:
+        audio = lb.resample(audio, orig_sr=orig_sr, target_sr=sample_rate, res_type="kaiser_fast")
+    return audio.astype(np.float32)
+
+
+def slice_window(audio: np.ndarray, end_sec: float, sample_rate: int) -> np.ndarray:
+    end_sample = int(round(float(end_sec) * sample_rate))
+    start_sample = max(0, end_sample - PERCH_NUM_SAMPLES)
+    window = audio[start_sample:end_sample]
+    if len(window) == 0:
+        window = np.zeros(PERCH_NUM_SAMPLES, dtype=np.float32)
+    else:
+        window = crop_or_pad(window, PERCH_NUM_SAMPLES, is_train=False)
+    return window.astype(np.float32)
+
+
 def output_path(output_dir: Path, filename: str, end_sec: float) -> Path:
     stem = feature_file_stem(filename)
     return output_dir / "features" / f"{stem}__{int(round(end_sec))}.npy"
@@ -301,6 +329,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--kaggle-handle", default=KAGGLE_PERCH_V2_CPU_HANDLE)
     parser.add_argument("--onnx-path", type=Path, default=None, help="Optional local ONNX backbone path. Overrides the Kaggle TensorFlow2 model.")
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--audio-workers", type=int, default=4, help="Parallel workers for per-window audio loading/resampling when --window-loading-mode window is used. Use 0 to disable.")
+    parser.add_argument("--window-loading-mode", choices=["file", "window"], default="file", help="Load each contiguous audio file once and slice windows, or load each window separately.")
     parser.add_argument("--include-valid", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--provider", action="append", dest="providers", help="ONNX Runtime provider. Can be passed more than once.")
@@ -332,7 +362,8 @@ def main() -> None:
     total = len(jobs)
     print(
         f"[perch-extract] jobs={total} output_dir={output_dir} "
-        f"batch_size={args.batch_size} overwrite={args.overwrite}",
+        f"batch_size={args.batch_size} audio_workers={args.audio_workers} "
+        f"window_loading_mode={args.window_loading_mode} overwrite={args.overwrite}",
         file=sys.stderr,
         flush=True,
     )
@@ -349,8 +380,11 @@ def main() -> None:
     rows = []
     pending_audio = []
     pending_meta = []
+    pending_loads = set()
     extracted = 0
     skipped = 0
+    audio_workers = max(0, int(args.audio_workers))
+    max_pending_loads = max(args.batch_size, audio_workers * 4)
 
     progress = tqdm(total=total, desc="perch-extract", unit="job", dynamic_ncols=True)
 
@@ -359,6 +393,7 @@ def main() -> None:
             extracted=extracted,
             skipped=skipped,
             pending=len(pending_audio),
+            loading=len(pending_loads),
             refresh=False,
         )
         progress.update(1)
@@ -376,22 +411,84 @@ def main() -> None:
         pending_audio = []
         pending_meta = []
 
-    try:
-        for filename, audio_path, end_sec in jobs:
-            path = output_path(output_dir, filename, end_sec)
-            if path.exists() and not args.overwrite:
-                rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(path.relative_to(output_dir))})
-                skipped += 1
-                update_progress()
-                continue
-            pending_audio.append(load_window(audio_path, end_sec, PERCH_SAMPLE_RATE))
-            pending_meta.append((filename, end_sec, path))
-            if len(pending_audio) >= args.batch_size:
-                flush()
+    def add_loaded(filename: str, end_sec: float, path: Path, audio: np.ndarray) -> None:
+        pending_audio.append(audio)
+        pending_meta.append((filename, end_sec, path))
+        if len(pending_audio) >= args.batch_size:
+            flush()
+
+    def load_job(filename: str, audio_path: str, end_sec: float, path: Path):
+        return filename, end_sec, path, load_window(audio_path, end_sec, PERCH_SAMPLE_RATE)
+
+    def drain_completed_loads(block: bool = False) -> None:
+        if not pending_loads:
+            return
+        if block:
+            done, _ = wait(pending_loads, return_when=FIRST_COMPLETED)
+        else:
+            done = {future for future in pending_loads if future.done()}
+        for future in done:
+            pending_loads.remove(future)
+            add_loaded(*future.result())
             update_progress()
+
+    executor = ThreadPoolExecutor(max_workers=audio_workers) if audio_workers > 0 and args.window_loading_mode == "window" else None
+    try:
+        if args.window_loading_mode == "file":
+            for audio_path, group_iter in groupby(jobs, key=lambda item: item[1]):
+                group = list(group_iter)
+                to_extract = []
+                for filename, _, end_sec in group:
+                    path = output_path(output_dir, filename, end_sec)
+                    if path.exists() and not args.overwrite:
+                        rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(path.relative_to(output_dir))})
+                        skipped += 1
+                        update_progress()
+                    else:
+                        to_extract.append((filename, end_sec, path))
+
+                if not to_extract:
+                    continue
+
+                progress.set_postfix(
+                    extracted=extracted,
+                    skipped=skipped,
+                    pending=len(pending_audio),
+                    loading=Path(audio_path).name[:24],
+                    refresh=False,
+                )
+                audio = load_audio_file(audio_path, PERCH_SAMPLE_RATE)
+                for filename, end_sec, path in to_extract:
+                    add_loaded(filename, end_sec, path, slice_window(audio, end_sec, PERCH_SAMPLE_RATE))
+                    update_progress()
+        else:
+            for filename, audio_path, end_sec in jobs:
+                path = output_path(output_dir, filename, end_sec)
+                if path.exists() and not args.overwrite:
+                    rows.append({"filename": filename, "end_sec": int(round(end_sec)), "path": str(path.relative_to(output_dir))})
+                    skipped += 1
+                    update_progress()
+                    continue
+
+                if executor is None:
+                    add_loaded(filename, end_sec, path, load_window(audio_path, end_sec, PERCH_SAMPLE_RATE))
+                    update_progress()
+                    continue
+
+                pending_loads.add(executor.submit(load_job, filename, audio_path, end_sec, path))
+                if len(pending_loads) >= max_pending_loads:
+                    drain_completed_loads(block=True)
+                else:
+                    drain_completed_loads(block=False)
+
+            while pending_loads:
+                drain_completed_loads(block=True)
+
         flush()
-        progress.set_postfix(extracted=extracted, skipped=skipped, pending=0, refresh=True)
+        progress.set_postfix(extracted=extracted, skipped=skipped, pending=0, loading=0, refresh=True)
     finally:
+        if executor is not None:
+            executor.shutdown(cancel_futures=True)
         progress.close()
 
     with index_path.open("w", newline="") as f:
