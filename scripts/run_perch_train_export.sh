@@ -129,18 +129,18 @@ ensure_perch_env() {
     return
   fi
 
-  if conda run -n "$PERCH_ENV" python - <<'PY'
+  if conda run -n "$PERCH_ENV" python -c '
 from importlib import metadata
 from packaging.version import Version
 
 required = {
-    'tensorflow': ('2.20.0', '2.21.0'),
-    'numpy': ('1.26.0', '2.3.0'),
-    'librosa': ('0.10.0', '0.12.0'),
-    'soundfile': ('0.0.0', None),
-    'scipy': ('0.0.0', None),
-    'soxr': ('0.0.0', None),
-    'kagglehub': ('0.0.0', None),
+    "tensorflow": ("2.20.0", "2.21.0"),
+    "numpy": ("1.26.0", "2.3.0"),
+    "librosa": ("0.10.0", "0.12.0"),
+    "soundfile": ("0.0.0", None),
+    "scipy": ("0.0.0", None),
+    "soxr": ("0.0.0", None),
+    "kagglehub": ("0.0.0", None),
 }
 missing = []
 for pkg, (min_v, max_v) in required.items():
@@ -150,20 +150,20 @@ for pkg, (min_v, max_v) in required.items():
         missing.append(pkg)
         continue
     if min_v and version < Version(min_v):
-        missing.append(f'{pkg}>={min_v}')
+        missing.append(f"{pkg}>={min_v}")
     if max_v and version >= Version(max_v):
-        missing.append(f'{pkg}<{max_v}')
+        missing.append(f"{pkg}<{max_v}")
 if missing:
-    print('missing_or_incompatible=' + ','.join(missing))
+    print("missing_or_incompatible=" + ",".join(missing))
     raise SystemExit(1)
-print('Perch dependencies already satisfy requirements')
-PY
+print("Perch dependencies already satisfy requirements")
+'
   then
     return
   fi
 
   echo "[perch-env] installing TensorFlow Perch dependencies with retries"
-  conda run -n "$PERCH_ENV" python -m pip install \
+  conda run -n "$PERCH_ENV" python -m pip install --no-input \
     --retries "$PIP_RETRIES" \
     --timeout "$PIP_TIMEOUT" \
     --resume-retries "$PIP_RETRIES" \

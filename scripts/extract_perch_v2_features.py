@@ -9,7 +9,6 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
-import librosa as lb
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +179,14 @@ def read_manifest(path: Path) -> list[tuple[str, str, float]]:
 
 
 def load_window(path: str, end_sec: float, sample_rate: int) -> np.ndarray:
+    try:
+        import librosa as lb
+    except ImportError as exc:
+        raise SystemExit(
+            "librosa is required for Perch V2 audio loading in the extraction environment. "
+            "Run the pipeline without --skip-perch-install, or install librosa in the Perch env."
+        ) from exc
+
     offset = max(0.0, float(end_sec) - PERCH_WINDOW_SECONDS)
     audio, orig_sr = lb.load(path, sr=None, mono=True, offset=offset, duration=PERCH_WINDOW_SECONDS)
     if orig_sr != sample_rate:
