@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from modules.utils import crop_or_pad
+from modules.perch import PerchFeatureStore
 import multiprocessing
 import os
 
@@ -30,6 +31,19 @@ class BirdTrainDataset(Dataset):
         self.pseudo = pseudo
 
         self.transforms = transforms
+        self.use_perch = bool(getattr(cfg, "use_perch_distill", False))
+        self.perch_store = None
+        if self.use_perch:
+            self.perch_store = PerchFeatureStore(
+                getattr(cfg, "perch_feature_dir", "outputs/perch_features"),
+                embedding_dim=getattr(cfg, "perch_dim", 1280),
+                required=getattr(cfg, "require_perch_features", False),
+            )
+
+    def load_perch_target(self, filename, sample_ends):
+        if not self.use_perch or self.perch_store is None:
+            return None, None
+        return self.perch_store.load_many(filename, sample_ends)
 
     def __len__(self):
         return len(self.df)
@@ -109,7 +123,9 @@ class BirdTrainDataset(Dataset):
             target = target.values
             if not self.train:
                 target[target>0] = 1
-            return audio_sample, target
+            sample_ends = [clip_start + (i + 1) * self.cfg.infer_duration for i in range(int(np.ceil(self.duration / self.cfg.infer_duration)))]
+            perch_target, perch_mask = self.load_perch_target(filename, sample_ends)
+            return audio_sample, target, perch_target, perch_mask
         elif getattr(self.cfg, "fixed_clip_mode", False):
             max_offset = max(0.0, float(duration) - self.duration)
             offset = torch.rand((1,)).numpy()[0] * max_offset if self.train else 0.0
@@ -137,7 +153,9 @@ class BirdTrainDataset(Dataset):
             target = target.values
             if not self.train:
                 target[target > 0] = 1
-            return audio_sample, target
+            sample_ends = [offset + (i + 1) * self.cfg.infer_duration for i in range(int(np.ceil(self.duration / self.cfg.infer_duration)))]
+            perch_target, perch_mask = self.load_perch_target(filename, sample_ends)
+            return audio_sample, target, perch_target, perch_mask
 
         # self mixup
         self_mixup_part = 1
@@ -222,7 +240,8 @@ class BirdTrainDataset(Dataset):
         target = target.values
         if not self.train:
           target[target>0] = 1
-        return audio_sample,target
+        perch_target, perch_mask = self.load_perch_target(filename, sample_ends)
+        return audio_sample, target, perch_target, perch_mask
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
@@ -231,8 +250,12 @@ class BirdTrainDataset(Dataset):
         weight = self.df.loc[idx,"weight"]
         if row['presence_type']!='foreground':
             weight = weight * 0.8
-        audio, target = self.load_data(self.df.loc[idx, "path"],target,row)
+        audio, target, perch_target, perch_mask = self.load_data(self.df.loc[idx, "path"],target,row)
         target = torch.tensor(target).float()
+        if self.use_perch:
+            perch_target = torch.tensor(perch_target).float()
+            perch_mask = torch.tensor(float(perch_mask)).float()
+            return audio, target, weight, perch_target, perch_mask
         return audio, target , weight
 
 def get_train_dataloader(df_train, df_valid, df_labels_train, df_labels_valid, sample_weight,cfg,pseudo=None,transforms=None):

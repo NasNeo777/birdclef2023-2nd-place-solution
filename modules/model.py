@@ -304,42 +304,53 @@ class Mixup(nn.Module):
         self.mixup_prob = mixup_prob
         self.mixup_double = mixup_double
 
-    def forward(self, X, Y, weight=None):
-        p = torch.rand((1,))[0]
-        if p < self.mixup_prob:
-            bs = X.shape[0]
-            n_dims = len(X.shape)
-            perm = torch.randperm(bs)
+    def _mix_aux(self, aux, aux_mask, terms):
+        if aux is None:
+            return None, None
+        aux_mask = aux_mask.to(device=aux.device, dtype=aux.dtype)
+        mixed = torch.zeros_like(aux)
+        denom = torch.zeros_like(aux_mask)
+        for coeff, idx in terms:
+            mask = aux_mask[idx]
+            mixed = mixed + coeff * aux[idx] * mask.view(-1, 1)
+            denom = denom + coeff * mask
+        mixed = mixed / denom.clamp_min(1e-6).view(-1, 1)
+        return mixed, (denom > 0).to(aux_mask.dtype)
 
-            p1 = torch.rand((1,))[0]
-            if p1 < self.mixup_double:
-                X = X + X[perm]
-                Y = Y + Y[perm]
-                Y = torch.clamp(Y, 0, 1)
-
-                if weight is None:
-                    return X, Y
-                else:
-                    weight = 0.5 * weight + 0.5 * weight[perm]
-                    return X, Y, weight
-            else:
-                perm2 = torch.randperm(bs)
-                X = X + X[perm] + X[perm2]
-                Y = Y + Y[perm] + Y[perm2]
-                Y = torch.clamp(Y, 0, 1)
-
-                if weight is None:
-                    return X, Y
-                else:
-                    weight = (
-                        1 / 3 * weight + 1 / 3 * weight[perm] + 1 / 3 * weight[perm2]
-                    )
-                    return X, Y, weight
-        else:
+    def _return(self, X, Y, weight, aux, aux_mask):
+        if aux is None:
             if weight is None:
                 return X, Y
-            else:
-                return X, Y, weight
+            return X, Y, weight
+        return X, Y, weight, aux, aux_mask
+
+    def forward(self, X, Y, weight=None, aux=None, aux_mask=None):
+        p = torch.rand((1,), device=X.device)[0]
+        if p < self.mixup_prob:
+            bs = X.shape[0]
+            idx = torch.arange(bs, device=X.device)
+            perm = torch.randperm(bs, device=X.device)
+
+            p1 = torch.rand((1,), device=X.device)[0]
+            if p1 < self.mixup_double:
+                X = X + X[perm]
+                Y = torch.clamp(Y + Y[perm], 0, 1)
+                if weight is not None:
+                    weight = 0.5 * weight + 0.5 * weight[perm]
+                aux, aux_mask = self._mix_aux(aux, aux_mask, [(0.5, idx), (0.5, perm)])
+                return self._return(X, Y, weight, aux, aux_mask)
+
+            perm2 = torch.randperm(bs, device=X.device)
+            X = X + X[perm] + X[perm2]
+            Y = torch.clamp(Y + Y[perm] + Y[perm2], 0, 1)
+            if weight is not None:
+                weight = 1 / 3 * weight + 1 / 3 * weight[perm] + 1 / 3 * weight[perm2]
+            aux, aux_mask = self._mix_aux(
+                aux, aux_mask, [(1 / 3, idx), (1 / 3, perm), (1 / 3, perm2)]
+            )
+            return self._return(X, Y, weight, aux, aux_mask)
+
+        return self._return(X, Y, weight, aux, aux_mask)
 
 
 class Mixup2(nn.Module):
@@ -348,12 +359,19 @@ class Mixup2(nn.Module):
         self.beta_distribution = Beta(mix_beta, mix_beta)
         self.mixup2_prob = mixup2_prob
 
-    def forward(self, X, Y, weight=None):
-        p = torch.rand((1,))[0]
+    def _return(self, X, Y, weight, aux, aux_mask):
+        if aux is None:
+            if weight is None:
+                return X, Y
+            return X, Y, weight
+        return X, Y, weight, aux, aux_mask
+
+    def forward(self, X, Y, weight=None, aux=None, aux_mask=None):
+        p = torch.rand((1,), device=X.device)[0]
         if p < self.mixup2_prob:
             bs = X.shape[0]
             n_dims = len(X.shape)
-            perm = torch.randperm(bs)
+            perm = torch.randperm(bs, device=X.device)
             coeffs = self.beta_distribution.rsample(torch.Size((bs,))).to(X.device)
 
             if n_dims == 2:
@@ -366,19 +384,21 @@ class Mixup2(nn.Module):
                     + (1 - coeffs.view(-1, 1, 1, 1)) * X[perm]
                 )
             Y = coeffs.view(-1, 1) * Y + (1 - coeffs.view(-1, 1)) * Y[perm]
-            # Y = Y + Y[perm]
-            # Y = torch.clamp(Y, 0, 1)
 
-            if weight is None:
-                return X, Y
-            else:
+            if weight is not None:
                 weight = coeffs.view(-1) * weight + (1 - coeffs.view(-1)) * weight[perm]
-                return X, Y, weight
-        else:
-            if weight is None:
-                return X, Y
-            else:
-                return X, Y, weight
+            if aux is not None:
+                aux_mask = aux_mask.to(device=aux.device, dtype=aux.dtype)
+                c = coeffs.to(aux.dtype)
+                denom = c * aux_mask + (1 - c) * aux_mask[perm]
+                aux = (
+                    c.view(-1, 1) * aux * aux_mask.view(-1, 1)
+                    + (1 - c).view(-1, 1) * aux[perm] * aux_mask[perm].view(-1, 1)
+                ) / denom.clamp_min(1e-6).view(-1, 1)
+                aux_mask = (denom > 0).to(aux_mask.dtype)
+            return self._return(X, Y, weight, aux, aux_mask)
+
+        return self._return(X, Y, weight, aux, aux_mask)
 
 
 class BirdClefModelBase(pl.LightningModule):
@@ -392,6 +412,11 @@ class BirdClefModelBase(pl.LightningModule):
         self.lr = cfg.lr[stage]
         self.epochs = cfg.epochs[stage]
         self.in_chans = cfg.in_chans
+        self.use_perch_distill = (
+            bool(getattr(cfg, "use_perch_distill", False))
+            and stage in set(getattr(cfg, "perch_distill_stages", (stage,)))
+        )
+        self.perch_head = None
 
         self.auc_loss_function = SoftAUCLoss()
         self.bce_loss_function = nn.BCEWithLogitsLoss(reduction="none")
@@ -457,6 +482,47 @@ class BirdClefModelBase(pl.LightningModule):
         self.db_transform = torchaudio.transforms.AmplitudeToDB(
             stype="power", top_db=80
         )
+
+    def init_perch_head(self, in_features):
+        if not self.use_perch_distill:
+            self.perch_head = None
+            return
+        self.perch_head = nn.Sequential(
+            nn.LayerNorm(in_features),
+            nn.Linear(in_features, int(getattr(self.cfg, "perch_dim", 1280))),
+        )
+
+    def unpack_batch(self, batch):
+        x = batch[0]
+        y = batch[1]
+        weight = batch[2]
+        perch_target = batch[3] if self.use_perch_distill and len(batch) > 3 else None
+        perch_mask = batch[4] if self.use_perch_distill and len(batch) > 4 else None
+        if perch_target is not None:
+            perch_target = perch_target.to(device=x.device, dtype=x.dtype)
+            perch_mask = perch_mask.to(device=x.device, dtype=x.dtype)
+        return x, y, weight, perch_target, perch_mask
+
+    def perch_distill_loss(self, student_feature, perch_target, perch_mask):
+        if self.perch_head is None or perch_target is None or perch_mask is None:
+            return student_feature.new_tensor(0.0)
+        perch_mask = perch_mask.to(device=student_feature.device, dtype=student_feature.dtype)
+        valid = perch_mask > 0
+        if not torch.any(valid):
+            return student_feature.new_tensor(0.0)
+        pred = self.perch_head(student_feature)
+        target = perch_target.to(device=pred.device, dtype=pred.dtype)
+        if getattr(self.cfg, "perch_loss_type", "cosine") == "mse":
+            per_sample = F.mse_loss(pred, target, reduction="none").mean(dim=1)
+        else:
+            per_sample = 1.0 - F.cosine_similarity(pred, target, dim=1)
+        return (per_sample * perch_mask).sum() / perch_mask.sum().clamp_min(1e-6)
+
+    def add_perch_loss(self, loss, student_feature, perch_target, perch_mask):
+        if self.perch_head is None or not self.training:
+            return loss
+        perch_loss = self.perch_distill_loss(student_feature, perch_target, perch_mask)
+        return loss + float(getattr(self.cfg, "perch_loss_weight", 0.05)) * perch_loss
 
     def loss_function(self, logits, targets, sample_weights=None):
         targets = targets.to(dtype=logits.dtype)
@@ -597,15 +663,11 @@ class BirdClefModelBase(pl.LightningModule):
         return groups
 
     def configure_optimizers(self):
-        if getattr(self.cfg, "use_llrd", False):
-            params = self._llrd_param_groups()
-            model_optimizer = torch.optim.Adam(params, weight_decay=self.cfg.weight_decay)
-        else:
-            model_optimizer = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, self.parameters()),
-                lr=self.lr,
-                weight_decay=self.cfg.weight_decay,
-            )
+        model_optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters()),
+            lr=self.lr,
+            weight_decay=self.cfg.weight_decay,
+        )
         interval = "epoch"
 
         lr_scheduler = CosineAnnealingWarmRestarts(
@@ -759,6 +821,7 @@ class BirdClefTrainModelSED(BirdClefModelBase):
             in_features = base_model.fc.in_features
         self.fc1 = nn.Linear(in_features, in_features, bias=True)
         self.att_block = AttBlockV2(in_features, self.num_classes, activation="sigmoid")
+        self.init_perch_head(in_features)
 
         self.init_weight()
 
@@ -810,16 +873,16 @@ class BirdClefTrainModelSED(BirdClefModelBase):
         return x, frames_num
 
     def forward(self, batch):
-        x = batch[0]
-        y = batch[1]
-        weight = batch[2]
+        x, y, weight, perch_target, perch_mask = self.unpack_batch(batch)
         if not self.training:
             bs, channel, parts = x.shape[0], x.shape[1], x.shape[2]
             x = x.reshape((bs * parts, channel, -1))
 
         if self.training:
             if self.cfg.mixup:
-                x, y, weight = self.mixup(x, y, weight)
+                x, y, weight, perch_target, perch_mask = self.mixup(
+                    x, y, weight, perch_target, perch_mask
+                )
         #with autocast(enabled=False):
         x = self.transform_to_spec(x)
         if self.in_chans == 3:
@@ -827,9 +890,12 @@ class BirdClefTrainModelSED(BirdClefModelBase):
 
         if self.training:
             if self.cfg.mixup2:
-                x, y, weight = self.mixup2(x, y, weight)
+                x, y, weight, perch_target, perch_mask = self.mixup2(
+                    x, y, weight, perch_target, perch_mask
+                )
 
         x, frames_num = self.extract_feature(x)
+        perch_feature = x.mean(dim=2)
 
         (clipwise_output, norm_att, segmentwise_output) = self.att_block(x)
         logit = torch.sum(norm_att * self.att_block.cla(x), dim=2)
@@ -868,6 +934,7 @@ class BirdClefTrainModelSED(BirdClefModelBase):
         ) + 0.5 * self.loss_function(
             segmentwise_logit.max(1)[0], y, sample_weights=weight
         )
+        loss = self.add_perch_loss(loss, perch_feature, perch_target, perch_mask)
 
         return clipwise_logit, y, loss
 
@@ -933,6 +1000,7 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             backbone_out = self.backbone.num_features
 
         self.global_pool = GeM()
+        self.init_perch_head(backbone_out)
 
         self.head = nn.Linear(backbone_out, self.num_classes)
 
@@ -948,9 +1016,8 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
                 param.requires_grad = False
 
     def forward(self, batch):
-        x = batch[0].squeeze(1)
-        y = batch[1]
-        weight = batch[2]
+        x, y, weight, perch_target, perch_mask = self.unpack_batch(batch)
+        x = x.squeeze(1)
         if self.training:
             self.factor = self.cfg.train_part
         else:
@@ -961,7 +1028,9 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             x = x.reshape((bs, -1))
         else:
             if self.cfg.mixup:
-                x, y, weight = self.mixup(x, y, weight)
+                x, y, weight, perch_target, perch_mask = self.mixup(
+                    x, y, weight, perch_target, perch_mask
+                )
         bs, time = x.shape
         x = x.reshape(bs * self.factor, time // self.factor)
         #with autocast(enabled=False):
@@ -979,7 +1048,9 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             x = x.reshape(b // self.factor, self.factor * t, c, f)
 
             if self.cfg.mixup2:
-                x, y, weight = self.mixup2(x, y, weight)
+                x, y, weight, perch_target, perch_mask = self.mixup2(
+                    x, y, weight, perch_target, perch_mask
+                )
             # if self.cfg.mixup:
             #    x, y, weight = self.mixup(x, y, weight)
             # if self.cfg.mixup2:
@@ -1005,6 +1076,7 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             logits = self.head(x)
 
         loss = self.loss_function(logits, y, sample_weights=weight)
+        loss = self.add_perch_loss(loss, x, perch_target, perch_mask)
 
         return logits, y, loss
 
@@ -1069,7 +1141,10 @@ def load_model(cfg,stage,train=True):
                 state_dict = filter_incompatible_state_dict(model, state_dict)
                 model.load_state_dict(state_dict,strict=False)
         else:
+            use_perch_distill = getattr(cfg, "use_perch_distill", False)
+            cfg.use_perch_distill = False
             model = BirdClefInferModelSED(cfg, stage)
+            cfg.use_perch_distill = use_perch_distill
             state_dict = filter_incompatible_state_dict(model, state_dict)
             model.load_state_dict(state_dict,strict=False)
 
@@ -1084,7 +1159,10 @@ def load_model(cfg,stage,train=True):
                 state_dict = filter_incompatible_state_dict(model, state_dict)
                 model.load_state_dict(state_dict,strict=False)
         else:
+            use_perch_distill = getattr(cfg, "use_perch_distill", False)
+            cfg.use_perch_distill = False
             model = BirdClefInferModelCNN(cfg, stage)
+            cfg.use_perch_distill = use_perch_distill
             state_dict = filter_incompatible_state_dict(model, state_dict)
             model.load_state_dict(state_dict,strict=False)
     else:

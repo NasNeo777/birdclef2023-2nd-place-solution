@@ -21,13 +21,8 @@ from modules.preprocess import prepare_cfg
 DEFAULT_MODELS = [
     "sed_v2s",
     "sed_seresnext26t",
-    "sed_b3ns",
     "cnn_resnet34d",
-    "cnn_b3ns",
-    "cnn_v2s",
-    "cnn_b0ns",
 ]
-
 
 def final_stage(checkpoint_path: str) -> str:
     parts = Path(checkpoint_path).parts

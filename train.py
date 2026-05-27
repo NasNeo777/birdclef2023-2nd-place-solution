@@ -112,8 +112,7 @@ def make_parser():
     parser.add_argument('--stage', required=True,
                         choices=["pretrain_ce", "pretrain_bce", "train_ce", "train_bce", "finetune"])
     parser.add_argument('--model_name', required=True,
-                        choices=["sed_v2s", 'sed_b3ns', 'sed_seresnext26t', 'cnn_v2s', 'cnn_resnet34d', 'cnn_b3ns',
-                                 'cnn_b0ns'])
+                        choices=["sed_v2s", "sed_seresnext26t", "cnn_resnet34d"])
     parser.add_argument('--use_pseudo', action='store_true')
     return parser
 
@@ -128,15 +127,7 @@ def main():
     cfg = importlib.import_module(f'configs.{model_name}').basic_cfg
     cfg.batch_size = int_env_override("BIRDCLEF_BATCH_SIZE", model_name, stage, int(cfg.batch_size))
     cfg.PRECISION = precision_env_override("BIRDCLEF_PRECISION", model_name, stage, cfg.PRECISION)
-    cfg.use_llrd = bool_env_override("BIRDCLEF_USE_LLRD", model_name, stage, bool(getattr(cfg, "use_llrd", False)))
-    cfg.llrd_decay = float_env_override("BIRDCLEF_LLRD_DECAY", model_name, stage,
-                                        float(getattr(cfg, "llrd_decay", 0.8)))
-    cfg.llrd_head_lr_mult = float_env_override(
-        "BIRDCLEF_LLRD_HEAD_LR_MULT",
-        model_name,
-        stage,
-        float(getattr(cfg, "llrd_head_lr_mult", 1.0)),
-    )
+    cfg.use_llrd = False
     cfg = prepare_cfg(cfg, stage)
     accumulate_grad_batches = int_env_override(
         "BIRDCLEF_ACCUMULATE_GRAD_BATCHES",

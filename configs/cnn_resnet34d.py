@@ -23,6 +23,7 @@ if cfg.WANDB_API_KEY=='your key':
 
 cfg.model_type = "cnn"
 cfg.model_name = "resnet34d"
+cfg.use_perch_distill = True
 
 cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
@@ -30,7 +31,7 @@ cfg.secondary_label_weight = 0.5
 
 cfg.batch_size = 96
 cfg.PRECISION = 32
-cfg.use_llrd = True
+cfg.use_llrd = False
 cfg.llrd_decay = 0.8
 cfg.seed = {
     "pretrain_ce": 19941121,
