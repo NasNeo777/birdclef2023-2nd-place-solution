@@ -2,3 +2,4 @@
 /wandb/
 /outputs/
 /birdclef2026-2nd-place-openvino/outputs/
+/*.pkl
