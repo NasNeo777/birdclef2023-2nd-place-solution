@@ -15,14 +15,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from modules.model import load_model
+from modules.config_names import MODEL_NAMES
 from modules.preprocess import prepare_cfg
 
 
-DEFAULT_MODELS = [
-    "sed_v2s",
-    "sed_seresnext26t",
-    "cnn_resnet34d",
-]
+DEFAULT_MODELS = list(MODEL_NAMES)
 
 def final_stage(checkpoint_path: str) -> str:
     parts = Path(checkpoint_path).parts

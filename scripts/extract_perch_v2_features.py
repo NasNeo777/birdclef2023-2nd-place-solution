@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from modules.perch import feature_file_stem
+from modules.config_names import MODEL_NAMES
 
 
 def crop_or_pad(y, length, is_train=True, start=None):
@@ -320,7 +321,7 @@ def extract_embeddings(backend, model, batch: list[np.ndarray]) -> np.ndarray:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract Perch V2 embeddings for training distillation.")
-    parser.add_argument("--config", default="sed_v2s", choices=["sed_v2s", "sed_seresnext26t", "cnn_resnet34d"])
+    parser.add_argument("--config", default="sed_v2s", choices=list(MODEL_NAMES))
     parser.add_argument("--stage", default="train_ce", choices=["pretrain_ce", "pretrain_bce", "train_ce", "train_bce", "finetune"])
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--manifest", type=Path, default=None, help="Read extraction jobs from a CSV manifest instead of importing project configs.")

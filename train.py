@@ -11,6 +11,7 @@ os.environ.setdefault("WANDB_SILENT", "true")
 from modules.preprocess import preprocess, prepare_cfg
 from modules.dataset import get_train_dataloader
 from modules.model import load_model
+from modules.config_names import MODEL_NAMES
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, BackboneFinetuning, EarlyStopping
@@ -112,7 +113,7 @@ def make_parser():
     parser.add_argument('--stage', required=True,
                         choices=["pretrain_ce", "pretrain_bce", "train_ce", "train_bce", "finetune"])
     parser.add_argument('--model_name', required=True,
-                        choices=["sed_v2s", "sed_seresnext26t", "cnn_resnet34d"])
+                        choices=list(MODEL_NAMES))
     parser.add_argument('--use_pseudo', action='store_true')
     return parser
 

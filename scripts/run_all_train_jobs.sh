@@ -78,12 +78,9 @@ cd "$ROOT_DIR"
 mapfile -t JOBS < <(
   "$PYTHON_BIN" - <<'PY'
 import importlib
+from modules.config_names import MODEL_NAMES
 
-preferred_models = [
-    "sed_v2s",
-    "sed_seresnext26t",
-    "cnn_resnet34d",
-]
+preferred_models = list(MODEL_NAMES)
 preferred_stages = [
     "pretrain_ce",
     "pretrain_bce",

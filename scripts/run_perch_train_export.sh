@@ -44,7 +44,7 @@ Runs the full local pipeline:
   4. Export/package OpenVINO weights for Kaggle inference
 
 Options:
-  --models LIST             Comma-separated models. Default: sed_v2s,sed_seresnext26t,cnn_resnet34d
+  --models LIST             Comma-separated models. Default: sed_v2s,sed_seresnext26t,sed_b3ns,cnn_resnet34d,cnn_b3ns,cnn_v2s,cnn_b0ns
   --perch-batch-size N      Perch extraction batch size. Default: 16
   --perch-audio-workers N   Parallel audio loading/resampling workers. Default: 8
   --perch-env NAME          Conda env for TensorFlow Perch extraction. Default: PerchV2
