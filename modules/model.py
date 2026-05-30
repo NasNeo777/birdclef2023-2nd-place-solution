@@ -524,6 +524,13 @@ class BirdClefModelBase(pl.LightningModule):
         perch_loss = self.perch_distill_loss(student_feature, perch_target, perch_mask)
         return loss + float(getattr(self.cfg, "perch_loss_weight", 0.05)) * perch_loss
 
+    def apply_mixup(self, mixup_module, x, y, weight, perch_target, perch_mask):
+        mixed = mixup_module(x, y, weight, perch_target, perch_mask)
+        if len(mixed) == 3:
+            x, y, weight = mixed
+            return x, y, weight, None, None
+        return mixed
+
     def loss_function(self, logits, targets, sample_weights=None):
         targets = targets.to(dtype=logits.dtype)
         if self.loss == "ce":
@@ -880,8 +887,8 @@ class BirdClefTrainModelSED(BirdClefModelBase):
 
         if self.training:
             if self.cfg.mixup:
-                x, y, weight, perch_target, perch_mask = self.mixup(
-                    x, y, weight, perch_target, perch_mask
+                x, y, weight, perch_target, perch_mask = self.apply_mixup(
+                    self.mixup, x, y, weight, perch_target, perch_mask
                 )
         #with autocast(enabled=False):
         x = self.transform_to_spec(x)
@@ -890,8 +897,8 @@ class BirdClefTrainModelSED(BirdClefModelBase):
 
         if self.training:
             if self.cfg.mixup2:
-                x, y, weight, perch_target, perch_mask = self.mixup2(
-                    x, y, weight, perch_target, perch_mask
+                x, y, weight, perch_target, perch_mask = self.apply_mixup(
+                    self.mixup2, x, y, weight, perch_target, perch_mask
                 )
 
         x, frames_num = self.extract_feature(x)
@@ -1028,8 +1035,8 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             x = x.reshape((bs, -1))
         else:
             if self.cfg.mixup:
-                x, y, weight, perch_target, perch_mask = self.mixup(
-                    x, y, weight, perch_target, perch_mask
+                x, y, weight, perch_target, perch_mask = self.apply_mixup(
+                    self.mixup, x, y, weight, perch_target, perch_mask
                 )
         bs, time = x.shape
         x = x.reshape(bs * self.factor, time // self.factor)
@@ -1048,8 +1055,8 @@ class BirdClefTrainModelCNN(BirdClefModelBase):
             x = x.reshape(b // self.factor, self.factor * t, c, f)
 
             if self.cfg.mixup2:
-                x, y, weight, perch_target, perch_mask = self.mixup2(
-                    x, y, weight, perch_target, perch_mask
+                x, y, weight, perch_target, perch_mask = self.apply_mixup(
+                    self.mixup2, x, y, weight, perch_target, perch_mask
                 )
             # if self.cfg.mixup:
             #    x, y, weight = self.mixup(x, y, weight)

@@ -23,6 +23,7 @@ if cfg.WANDB_API_KEY=='your key':
 
 cfg.model_type = "cnn"
 cfg.model_name = "tf_efficientnetv2_s_in21k"
+cfg.use_perch_distill = True
 
 cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5

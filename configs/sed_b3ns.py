@@ -21,6 +21,7 @@ if cfg.WANDB_API_KEY=='your key':
 
 cfg.model_type = "sed"
 cfg.model_name = "tf_efficientnet_b3_ns"
+cfg.use_perch_distill = True
 
 cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
