@@ -29,7 +29,7 @@ cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
 
 
-cfg.batch_size = 96
+cfg.batch_size = 48
 cfg.PRECISION = 32
 cfg.use_llrd = False
 cfg.llrd_decay = 0.8

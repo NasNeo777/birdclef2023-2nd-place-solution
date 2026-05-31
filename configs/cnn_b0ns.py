@@ -29,7 +29,7 @@ cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
 
 
-cfg.batch_size = 128
+cfg.batch_size = 64
 cfg.PRECISION = 32
 cfg.seed = {
     "train_ce": 202111210524,

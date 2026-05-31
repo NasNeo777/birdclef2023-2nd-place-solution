@@ -27,7 +27,7 @@ cfg.secondary_label = 0.9
 cfg.secondary_label_weight = 0.5
 
 
-cfg.batch_size = 24
+cfg.batch_size = 12
 cfg.PRECISION = 32
 cfg.seed = {
     "pretrain_ce": 20201121,
